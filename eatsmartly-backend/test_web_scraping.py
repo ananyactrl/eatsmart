@@ -4,7 +4,7 @@ Test the new web scraping product search
 import requests
 import json
 
-BASE_URL = "http://localhost:8000"
+BASE_URL = "http://localhost:3000"
 
 def test_product_search():
     """Test searching for a product by name"""

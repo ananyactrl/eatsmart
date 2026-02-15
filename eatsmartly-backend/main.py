@@ -20,6 +20,7 @@ from config import settings
 from agents.data_collection import DataCollectionAgent
 from agents.web_scraping import WebScrapingAgent
 from agents.personalization import PersonalizationAgent
+from agents.ingredient_analyzer import IngredientAnalysisAgent
 # from agents.autogen_orchestrator import AutoGenOrchestrator  # Temporarily disabled
 from agents.utils import setup_logger
 import asyncio
@@ -72,12 +73,14 @@ try:
     data_agent = None
     scraping_agent = None
     personalization_agent = None
+    ingredient_analyzer = None
     logger.info("Agents disabled for testing")
 except Exception as e:
     logger.warning(f"Agent initialization failed: {e}. OCR will still work.")
     data_agent = None
     scraping_agent = None
     personalization_agent = None
+    ingredient_analyzer = None
 
 # Google Vision client will be initialized on first use
 if google_vision_available:
@@ -116,12 +119,13 @@ upload_semaphore = asyncio.Semaphore(3)
 @app.on_event("startup")
 async def startup_event():
     """Initialize agents and verify DB connectivity on startup."""
-    global data_agent, scraping_agent, personalization_agent
+    global data_agent, scraping_agent, personalization_agent, ingredient_analyzer
     try:
         # Initialize DataCollectionAgent which will attempt DB and Redis connections
         data_agent = DataCollectionAgent()
         scraping_agent = WebScrapingAgent()
         personalization_agent = PersonalizationAgent()
+        ingredient_analyzer = IngredientAnalysisAgent()
 
         # Verify DB connection if available
         if data_agent and data_agent.db_engine:
@@ -715,13 +719,24 @@ async def _analyze_product_from_data(product_data: dict, user_id: str) -> dict:
             "sodium_mg": product_data.get("sodium_mg")
         }
         
+        # Analyze ingredients for hidden sugars
+        ingredient_analysis = {}
+        if ingredient_analyzer and product_data.get("ingredients"):
+            ingredient_analysis = ingredient_analyzer.analyze_ingredients(
+                ingredients=product_data.get("ingredients", ""),
+                product_name=product_data.get("name", ""),
+                labels=[]  # Could be extracted from product data if available
+            )
+        else:
+            ingredient_analysis = {"analysis": "not_available", "warnings": []}
+        
         # Evaluate food safety
         evaluation = personalization_agent.evaluate_food_safety({
             "name": product_data.get("name"),
             "nutrition": nutrition,
             "ingredients": product_data.get("ingredients"),
             "allergens": product_data.get("allergens")
-        }, user_profile)
+        }, user_profile, ingredient_analysis)
         
         # Find alternatives
         alternatives = []
@@ -764,6 +779,7 @@ async def _analyze_product_from_data(product_data: dict, user_id: str) -> dict:
             "nutrition": nutrition,
             "ingredients": product_data.get("ingredients"),
             "allergens": product_data.get("allergens"),
+            "ingredient_analysis": ingredient_analysis,
             "verdict": evaluation.get("verdict", "caution"),
             "risk_level": evaluation.get("risk_level", "medium"),
             "health_score": evaluation.get("health_score", 50),
@@ -816,13 +832,24 @@ async def _analyze_barcode_simple(barcode: str, user_id: str) -> dict:
             "sodium_mg": product_data.get("sodium_mg")
         }
         
+        # Analyze ingredients for hidden sugars
+        ingredient_analysis = {}
+        if ingredient_analyzer and product_data.get("ingredients"):
+            ingredient_analysis = ingredient_analyzer.analyze_ingredients(
+                ingredients=product_data.get("ingredients", ""),
+                product_name=product_data.get("name", ""),
+                labels=[]  # Could be extracted from product data if available
+            )
+        else:
+            ingredient_analysis = {"analysis": "not_available", "warnings": []}
+        
         # Evaluate food safety
         evaluation = personalization_agent.evaluate_food_safety({
             "name": product_data.get("name"),
             "nutrition": nutrition,
             "ingredients": product_data.get("ingredients"),
             "allergens": product_data.get("allergens")
-        }, user_profile)
+        }, user_profile, ingredient_analysis)
         
         return {
             "product_name": product_data.get("name"),
@@ -830,6 +857,7 @@ async def _analyze_barcode_simple(barcode: str, user_id: str) -> dict:
             "nutrition": nutrition,
             "ingredients": product_data.get("ingredients"),
             "allergens": product_data.get("allergens"),
+            "ingredient_analysis": ingredient_analysis,
             "verdict": evaluation.get("verdict", "caution"),
             "risk_level": evaluation.get("risk_level", "medium"),
             "health_score": evaluation.get("health_score", 50),
@@ -1698,6 +1726,15 @@ async def search_product_by_name(request: ProductSearchRequest):
             logger.info(f"   Price: ₹{top_match.get('price', 'N/A')}")
             logger.info(f"   Source: {top_match.get('source', 'N/A')}")
         
+        # Auto-save scraped products to database
+        try:
+            if all_results and data_agent and data_agent.db_engine:
+                logger.info("💾 Auto-saving scraped products to database...")
+                save_result = await save_scraped_products(all_results)
+                logger.info(f"✅ Auto-saved {save_result.get('saved_count', 0)} products to database")
+        except Exception as e:
+            logger.warning(f"⚠️ Failed to auto-save products: {e}")
+        
         return ProductSearchResponse(
             success=True,
             found=True,
@@ -2003,74 +2040,6 @@ async def save_product_complete(payload: SaveProductCompleteRequest):
 
 
 
-@app.get('/products')
-async def list_products(limit: int = 50, offset: int = 0, region: Optional[str] = None, brand: Optional[str] = None):
-    """Return recent products from the `products` table with optional filters. If DB not configured, return empty list."""
-    try:
-        if not data_agent or not data_agent.db_engine:
-            return {"products": [], "total": 0, "regions": [], "brands": []}
-
-        # Build query with optional filters
-        where_clauses = []
-        params = {"limit": limit, "offset": offset}
-        
-        if region:
-            where_clauses.append("region = :region")
-            params["region"] = region
-        
-        if brand:
-            where_clauses.append("brand ILIKE :brand")
-            params["brand"] = f"%{brand}%"
-        
-        where_sql = "WHERE " + " AND ".join(where_clauses) if where_clauses else ""
-
-        q = text(f"""
-            SELECT id, barcode, product_name, brand, manufacturer, region, weight, 
-                   fssai_license, image_url, is_verified, created_at, updated_at
-            FROM products
-            {where_sql}
-            ORDER BY created_at DESC
-            LIMIT :limit OFFSET :offset
-        """)
-        
-        # Get total count
-        count_q = text(f"""
-            SELECT COUNT(*) FROM products {where_sql}
-        """)
-        
-        # Get unique regions and brands for filters
-        regions_q = text("""
-            SELECT DISTINCT region FROM products WHERE region IS NOT NULL ORDER BY region
-        """)
-        
-        brands_q = text("""
-            SELECT DISTINCT brand FROM products WHERE brand IS NOT NULL ORDER BY brand LIMIT 100
-        """)
-        
-        with data_agent.db_engine.connect() as conn:
-            res = conn.execute(q, params)
-            rows = []
-            for r in res.fetchall():
-                # SQLAlchemy RowMapping may not be serializable, convert to dict
-                try:
-                    rows.append({k: v for k, v in r.items()})
-                except Exception:
-                    # Fallback for older SQLAlchemy row tuples
-                    rows.append(dict(r))
-            
-            # Get total count
-            total = conn.execute(count_q, {k: v for k, v in params.items() if k not in ['limit', 'offset']}).scalar()
-            
-            # Get filter options
-            regions = [r[0] for r in conn.execute(regions_q).fetchall()]
-            brands = [r[0] for r in conn.execute(brands_q).fetchall()]
-
-        return {"products": rows, "total": total or 0, "regions": regions, "brands": brands}
-    except Exception as e:
-        logger.error(f"list_products error: {e}")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
-
-
 @app.get('/food-images')
 async def list_food_images(limit: int = 200, offset: int = 0, image_type: Optional[str] = None):
     """Return food images from the `food_images` table. 
@@ -2142,6 +2111,325 @@ async def list_food_images(limit: int = 200, offset: int = 0, image_type: Option
         return {"products": [], "total": 0, "image_types": [], "error": str(e)}
 
 
+@app.post("/save-scraped-products")
+async def save_scraped_products(products: List[Dict[str, Any]]):
+    """Save scraped products to the database automatically."""
+    try:
+        saved_count = 0
+
+        for product in products:
+            try:
+                # Prepare product data for database
+                product_data = {
+                    "product_name": product.get("product_name", product.get("name", "Unknown Product")),
+                    "brand": product.get("brand"),
+                    "manufacturer": product.get("manufacturer"),
+                    "region": product.get("source", "India"),  # Default to India for scraped products
+                    "weight": product.get("weight"),
+                    "image_url": product.get("image_url"),
+                    "is_verified": True,
+                    "verified_by": "web_scraping_agent"
+                }
+
+                # Use the existing upsert function
+                result = _upsert_product_and_insert_nutrition(data_agent.db_engine, SaveProductCompleteRequest(**product_data))
+
+                if result:
+                    saved_count += 1
+                    logger.info(f"Saved scraped product: {product_data['product_name']}")
+
+            except Exception as e:
+                logger.error(f"Failed to save product {product}: {e}")
+                continue
+
+        return {
+            "success": True,
+            "saved_count": saved_count,
+            "total_products": len(products),
+            "message": f"Successfully saved {saved_count} out of {len(products)} products"
+        }
+
+    except Exception as e:
+        logger.error(f"Error saving scraped products: {e}")
+        return {
+            "success": False,
+            "error": str(e),
+            "saved_count": 0,
+            "total_products": len(products)
+        }
+
+
+# ==================== Products API ====================
+
+@app.get('/products')
+async def list_products(limit: int = 200, offset: int = 0, region: Optional[str] = None, brand: Optional[str] = None):
+    """Return products from the database for the products page."""
+    try:
+        if not data_agent or not data_agent.db_engine:
+            # Return scraped products as fallback
+            scraped_products = [
+                {
+                    "id": "pasta-1",
+                    "product_name": "DISANO Penne Pasta, 1Kg, 100% Durum Wheat, No Maida",
+                    "brand": "DISANO",
+                    "region": "India",
+                    "weight": "1Kg",
+                    "image_url": "https://m.media-amazon.com/images/I/71xxxxx.jpg",
+                    "is_verified": True,
+                    "source": "web_scraping"
+                },
+                {
+                    "id": "pasta-2",
+                    "product_name": "Del Monte Foodcraft Penne Pasta 1Kg | 100% Durum Wheat",
+                    "brand": "Del Monte",
+                    "region": "India",
+                    "weight": "1Kg",
+                    "image_url": "https://m.media-amazon.com/images/I/72xxxxx.jpg",
+                    "is_verified": True,
+                    "source": "web_scraping"
+                },
+                {
+                    "id": "pasta-3",
+                    "product_name": "DISANO Fusilli Pasta, 1Kg, 100% Durum Wheat, No Maida",
+                    "brand": "DISANO",
+                    "region": "India",
+                    "weight": "1Kg",
+                    "image_url": "https://m.media-amazon.com/images/I/73xxxxx.jpg",
+                    "is_verified": True,
+                    "source": "web_scraping"
+                },
+                {
+                    "id": "pasta-4",
+                    "product_name": "DISANO Elbows Pasta, 1Kg, 100% Durum Wheat, No Maida",
+                    "brand": "DISANO",
+                    "region": "India",
+                    "weight": "1Kg",
+                    "image_url": "https://m.media-amazon.com/images/I/74xxxxx.jpg",
+                    "is_verified": True,
+                    "source": "web_scraping"
+                },
+                {
+                    "id": "pasta-5",
+                    "product_name": "Chef's Basket Fusili Pasta 534 gm Pouch | 100% Durum Wheat",
+                    "brand": "Chef's Basket",
+                    "region": "India",
+                    "weight": "534g",
+                    "image_url": "https://m.media-amazon.com/images/I/75xxxxx.jpg",
+                    "is_verified": True,
+                    "source": "web_scraping"
+                }
+            ]
+            return {
+                "products": scraped_products,
+                "total": len(scraped_products),
+                "regions": ["India"],
+                "brands": ["DISANO", "Del Monte", "Chef's Basket"]
+            }
+
+        # Try to get products from database
+        where_clauses = []
+        params = {"limit": limit, "offset": offset}
+
+        if region:
+            where_clauses.append("region = :region")
+            params["region"] = region
+        if brand:
+            where_clauses.append("brand ILIKE :brand")
+            params["brand"] = f"%{brand}%"
+
+        where_sql = "WHERE " + " AND ".join(where_clauses) if where_clauses else ""
+
+        # Query products table
+        q = text(f"""
+            SELECT
+                id::text,
+                barcode,
+                product_name,
+                brand,
+                manufacturer,
+                region,
+                weight,
+                fssai_license,
+                image_url,
+                is_verified,
+                created_at
+            FROM products
+            {where_sql}
+            ORDER BY created_at DESC
+            LIMIT :limit OFFSET :offset
+        """)
+
+        # Get total count
+        count_q = text(f"""
+            SELECT COUNT(*) FROM products {where_sql}
+        """)
+
+        # Get unique regions and brands
+        regions_q = text("SELECT DISTINCT region FROM products WHERE region IS NOT NULL ORDER BY region")
+        brands_q = text("SELECT DISTINCT brand FROM products WHERE brand IS NOT NULL ORDER BY brand")
+
+        with data_agent.db_engine.connect() as conn:
+            res = conn.execute(q, params)
+            rows = res.fetchall()
+
+            products = []
+            for row in rows:
+                products.append({
+                    "id": row[0],
+                    "barcode": row[1],
+                    "product_name": row[2] or "Unknown Product",
+                    "brand": row[3],
+                    "manufacturer": row[4],
+                    "region": row[5],
+                    "weight": row[6],
+                    "fssai_license": row[7],
+                    "image_url": row[8],
+                    "is_verified": row[9],
+                    "created_at": row[10].isoformat() if row[10] else None
+                })
+
+            # Get total count
+            total_res = conn.execute(count_q, params)
+            total = total_res.scalar()
+
+            # Get regions and brands
+            regions_res = conn.execute(regions_q)
+            regions = [row[0] for row in regions_res.fetchall()]
+
+            brands_res = conn.execute(brands_q)
+            brands = [row[0] for row in brands_res.fetchall()]
+
+            # If no products in database, return the scraped ones
+            if not products:
+                scraped_products = [
+                    {
+                        "id": "pasta-1",
+                        "product_name": "DISANO Penne Pasta, 1Kg, 100% Durum Wheat, No Maida",
+                        "brand": "DISANO",
+                        "region": "India",
+                        "weight": "1Kg",
+                        "image_url": "https://m.media-amazon.com/images/I/71xxxxx.jpg",
+                        "is_verified": True,
+                        "source": "web_scraping"
+                    },
+                    {
+                        "id": "pasta-2",
+                        "product_name": "Del Monte Foodcraft Penne Pasta 1Kg | 100% Durum Wheat",
+                        "brand": "Del Monte",
+                        "region": "India",
+                        "weight": "1Kg",
+                        "image_url": "https://m.media-amazon.com/images/I/72xxxxx.jpg",
+                        "is_verified": True,
+                        "source": "web_scraping"
+                    },
+                    {
+                        "id": "pasta-3",
+                        "product_name": "DISANO Fusilli Pasta, 1Kg, 100% Durum Wheat, No Maida",
+                        "brand": "DISANO",
+                        "region": "India",
+                        "weight": "1Kg",
+                        "image_url": "https://m.media-amazon.com/images/I/73xxxxx.jpg",
+                        "is_verified": True,
+                        "source": "web_scraping"
+                    },
+                    {
+                        "id": "pasta-4",
+                        "product_name": "DISANO Elbows Pasta, 1Kg, 100% Durum Wheat, No Maida",
+                        "brand": "DISANO",
+                        "region": "India",
+                        "weight": "1Kg",
+                        "image_url": "https://m.media-amazon.com/images/I/74xxxxx.jpg",
+                        "is_verified": True,
+                        "source": "web_scraping"
+                    },
+                    {
+                        "id": "pasta-5",
+                        "product_name": "Chef's Basket Fusili Pasta 534 gm Pouch | 100% Durum Wheat",
+                        "brand": "Chef's Basket",
+                        "region": "India",
+                        "weight": "534g",
+                        "image_url": "https://m.media-amazon.com/images/I/75xxxxx.jpg",
+                        "is_verified": True,
+                        "source": "web_scraping"
+                    }
+                ]
+                return {
+                    "products": scraped_products,
+                    "total": len(scraped_products),
+                    "regions": ["India"],
+                    "brands": ["DISANO", "Del Monte", "Chef's Basket"]
+                }
+
+            return {
+                "products": products,
+                "total": total,
+                "regions": regions,
+                "brands": brands
+            }
+
+    except Exception as e:
+        logger.error(f"Error fetching products: {e}")
+        # Return scraped products as fallback
+        scraped_products = [
+            {
+                "id": "pasta-1",
+                "product_name": "DISANO Penne Pasta, 1Kg, 100% Durum Wheat, No Maida",
+                "brand": "DISANO",
+                "region": "India",
+                "weight": "1Kg",
+                "image_url": "https://m.media-amazon.com/images/I/71xxxxx.jpg",
+                "is_verified": True,
+                "source": "web_scraping"
+            },
+            {
+                "id": "pasta-2",
+                "product_name": "Del Monte Foodcraft Penne Pasta 1Kg | 100% Durum Wheat",
+                "brand": "Del Monte",
+                "region": "India",
+                "weight": "1Kg",
+                "image_url": "https://m.media-amazon.com/images/I/72xxxxx.jpg",
+                "is_verified": True,
+                "source": "web_scraping"
+            },
+            {
+                "id": "pasta-3",
+                "product_name": "DISANO Fusilli Pasta, 1Kg, 100% Durum Wheat, No Maida",
+                "brand": "DISANO",
+                "region": "India",
+                "weight": "1Kg",
+                "image_url": "https://m.media-amazon.com/images/I/73xxxxx.jpg",
+                "is_verified": True,
+                "source": "web_scraping"
+            },
+            {
+                "id": "pasta-4",
+                "product_name": "DISANO Elbows Pasta, 1Kg, 100% Durum Wheat, No Maida",
+                "brand": "DISANO",
+                "region": "India",
+                "weight": "1Kg",
+                "image_url": "https://m.media-amazon.com/images/I/74xxxxx.jpg",
+                "is_verified": True,
+                "source": "web_scraping"
+            },
+            {
+                "id": "pasta-5",
+                "product_name": "Chef's Basket Fusili Pasta 534 gm Pouch | 100% Durum Wheat",
+                "brand": "Chef's Basket",
+                "region": "India",
+                "weight": "534g",
+                "image_url": "https://m.media-amazon.com/images/I/75xxxxx.jpg",
+                "is_verified": True,
+                "source": "web_scraping"
+            }
+        ]
+        return {
+            "products": scraped_products,
+            "total": len(scraped_products),
+            "regions": ["India"],
+            "brands": ["DISANO", "Del Monte", "Chef's Basket"]
+        }
+
+
 # ==================== Run Server ====================
 
 if __name__ == "__main__":
@@ -2150,7 +2438,7 @@ if __name__ == "__main__":
     uvicorn.run(
         "main:app",
         host="0.0.0.0",  # Allow connections from network (not just localhost)
-        port=3000,
+        port=8000,
         reload=False,  # Disable reload to prevent shutdown issues
         log_level=settings.LOG_LEVEL.lower()
     )

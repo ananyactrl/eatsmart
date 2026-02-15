@@ -212,7 +212,8 @@ class PersonalizationAgent:
     def evaluate_food_safety(
         self, 
         food_data: Dict[str, Any], 
-        user_profile: Dict[str, Any]
+        user_profile: Dict[str, Any],
+        ingredient_analysis: Dict[str, Any] = None
     ) -> Dict[str, Any]:
         """
         Evaluate if food is safe for user based on profile.
@@ -256,8 +257,31 @@ class PersonalizationAgent:
             if marker_count >= 2 and "noodle" in ingredients:
                 is_instant_noodles = True
         
-        # Get health conditions early for instant noodles warnings
-        conditions = user_profile.get("health_conditions", [])
+        # Use ingredient analysis results if available
+        unhealthy_score = 0
+        ingredient_warnings = []
+        if ingredient_analysis:
+            unhealthy_score = ingredient_analysis.get("unhealthy_score", 0)
+            ingredient_warnings = ingredient_analysis.get("warnings", [])
+            
+            # Add ingredient analysis warnings to our alerts
+            for warning in ingredient_warnings:
+                if warning["severity"] == "high":
+                    alerts.append(f"🚨 {warning['message']}")
+                    if risk_level == "low":
+                        risk_level = "medium"
+                elif warning["severity"] == "medium":
+                    warnings.append(f"⚠️ {warning['message']}")
+                else:
+                    warnings.append(f"ℹ️ {warning['message']}")
+            
+            # Adjust risk level based on unhealthy score
+            if unhealthy_score >= 3:
+                risk_level = "high"
+                if not is_instant_noodles:  # Don't duplicate for noodles
+                    alerts.append("🚨 HIGHLY PROCESSED: Contains multiple unhealthy ingredients")
+            elif unhealthy_score >= 2 and risk_level == "low":
+                risk_level = "medium"
         
         # Check allergens
         food_allergens = food_data.get("allergens", [])
@@ -297,6 +321,7 @@ class PersonalizationAgent:
                 alerts.append("⚠️ Contains gluten (gluten-free restriction)")
         
         # Check diabetes condition for sugar
+        conditions = user_profile.get("health_conditions", [])
         if "diabetes" in conditions:
             sugar = food_data.get("sugar_g", 0) or 0
             if sugar > 15:

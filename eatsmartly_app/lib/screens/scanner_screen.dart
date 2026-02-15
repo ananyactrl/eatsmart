@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
+import 'package:google_fonts/google_fonts.dart';
 import '../services/api_service.dart';
 import '../services/ocr_service.dart';
 import '../services/ocr_parser.dart';
@@ -117,8 +118,12 @@ class _ScannerScreenState extends State<ScannerScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      backgroundColor: const Color(0xFFFFF8E1),
       appBar: AppBar(
-        title: const Text('Scan Barcode'),
+        backgroundColor: const Color(0xFFFFC1CC),
+        title: Text('Scan Barcode',
+            style: GoogleFonts.youngSerif(
+                fontSize: 18, fontWeight: FontWeight.w700)),
       ),
       body: Stack(
         children: [
@@ -150,16 +155,18 @@ class _ScannerScreenState extends State<ScannerScreen> {
             child: Container(
               padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
               child: Card(
-                color: AppColors.primary.withOpacity(0.9),
+                color: const Color(0xFFFFC1CC), // pastel pink
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12)),
                 child: Padding(
                   padding: const EdgeInsets.all(16),
                   child: Text(
                     'Position the barcode within the frame',
                     textAlign: TextAlign.center,
-                    style: TextStyle(
-                      color: AppColors.textOnDark,
+                    style: GoogleFonts.youngSerif(
+                      color: Colors.white,
                       fontSize: 16,
-                      fontWeight: FontWeight.w500,
+                      fontWeight: FontWeight.w600,
                     ),
                   ),
                 ),
@@ -170,24 +177,27 @@ class _ScannerScreenState extends State<ScannerScreen> {
           // Loading indicator
           if (isProcessing)
             Container(
-              color: Colors.black54,
+              color: Colors.black45,
               child: Center(
                 child: Card(
+                  color: Colors.white,
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12)),
                   child: Padding(
-                    padding: const EdgeInsets.all(24),
+                    padding: const EdgeInsets.all(20),
                     child: Column(
                       mainAxisSize: MainAxisSize.min,
                       children: [
                         CircularProgressIndicator(
-                          color: AppColors.primary,
+                          color: const Color(0xFFFFC1CC), // pastel pink
                           value: progressStep / 5,
                         ),
-                        const SizedBox(height: 16),
+                        const SizedBox(height: 14),
                         Text(
                           statusMessage,
                           textAlign: TextAlign.center,
-                          style: TextStyle(
-                            color: AppColors.textPrimary,
+                          style: GoogleFonts.youngSerif(
+                            color: const Color(0xFF4C0004),
                             fontSize: 16,
                             fontWeight: FontWeight.bold,
                           ),
@@ -195,16 +205,16 @@ class _ScannerScreenState extends State<ScannerScreen> {
                         const SizedBox(height: 8),
                         Text(
                           'Step $progressStep of 5',
-                          style: TextStyle(
-                            color: AppColors.textSecondary,
+                          style: GoogleFonts.youngSerif(
+                            color: const Color(0xFFAFA231),
                             fontSize: 12,
                           ),
                         ),
                         const SizedBox(height: 8),
                         Text(
                           'This may take up to 60 seconds',
-                          style: TextStyle(
-                            color: AppColors.textLight,
+                          style: GoogleFonts.youngSerif(
+                            color: const Color(0xFF5A5A5A),
                             fontSize: 11,
                           ),
                         ),
@@ -226,23 +236,23 @@ class _ScannerScreenState extends State<ScannerScreen> {
                 // Toggle flash
                 FloatingActionButton(
                   heroTag: 'flash',
-                  backgroundColor: AppColors.info,
+                  backgroundColor: const Color(0xFFFFC1CC), // pastel pink
                   onPressed: () => cameraController.toggleTorch(),
-                  child: const Icon(Icons.flash_on),
+                  child: const Icon(Icons.flash_on, color: Colors.white),
                 ),
 
                 // Flip camera
                 FloatingActionButton(
                   heroTag: 'flip',
-                  backgroundColor: AppColors.info,
+                  backgroundColor: const Color(0xFFFFC1CC),
                   onPressed: () => cameraController.switchCamera(),
-                  child: const Icon(Icons.flip_camera_ios),
+                  child: const Icon(Icons.flip_camera_ios, color: Colors.white),
                 ),
 
                 // OCR capture
                 FloatingActionButton(
                   heroTag: 'ocr',
-                  backgroundColor: AppColors.primary,
+                  backgroundColor: const Color(0xFFFFC1CC),
                   onPressed: isOcrProcessing
                       ? null
                       : () async {
@@ -344,7 +354,7 @@ class _ScannerScreenState extends State<ScannerScreen> {
                         },
                   child: isOcrProcessing
                       ? const CircularProgressIndicator(color: Colors.white)
-                      : const Icon(Icons.text_snippet),
+                      : const Icon(Icons.text_snippet, color: Colors.white),
                 ),
               ],
             ),
@@ -379,7 +389,7 @@ class ScannerOverlayPainter extends CustomPainter {
 
     // Draw corner brackets
     final bracketPaint = Paint()
-      ..color = AppColors.secondary
+      ..color = const Color(0xFFFFC1CC)
       ..style = PaintingStyle.stroke
       ..strokeWidth = 4;
 

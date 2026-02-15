@@ -78,9 +78,13 @@ def search_amazon_india(product_name: str, max_results: int = 5) -> List[Dict]:
                     continue
                 
                 # Extract title
-                title_elem = card.find('h2', class_='')
+                title_elem = card.find('h2', class_='a-size-base-plus')
                 if not title_elem:
-                    title_elem = card.find('span', class_='a-size-medium')
+                    # Fallback to any h2
+                    h2s = card.find_all('h2')
+                    if h2s:
+                        # Take the h2 with the longest text (usually the main title)
+                        title_elem = max(h2s, key=lambda h: len(h.get_text(strip=True)))
                 title = title_elem.get_text(strip=True) if title_elem else None
                 
                 if not title:

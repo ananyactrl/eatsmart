@@ -75,9 +75,9 @@ export default function Product() {
     const fetchProducts = async () => {
         setLoading(true)
         try {
-            // Fetch from food_images table (Supabase data with bucket URLs)
-            console.log('Fetching from /food-images endpoint...')
-            let url = 'http://localhost:3000/food-images?limit=200'
+            // Fetch from products endpoint
+            console.log('Fetching from /products endpoint...')
+            let url = 'http://localhost:8000/products?limit=200'
 
             const res = await fetch(url)
             console.log('Response status:', res.status)
@@ -100,58 +100,24 @@ export default function Product() {
 
                     console.log('Products loaded successfully!')
                 } else {
-                    console.log('No products in food_images, trying fallback...')
-                    // Fallback to products table
-                    await fetchFromProductsTable()
+                    console.log('No products found')
+                    setProducts([])
+                    setFilteredProducts([])
+                    setTotal(0)
                 }
             } else {
-                console.error('Failed to fetch from /food-images:', res.statusText)
-                await fetchFromProductsTable()
+                console.error('Failed to fetch from /products:', res.statusText)
+                setProducts([])
+                setFilteredProducts([])
+                setTotal(0)
             }
         } catch (e) {
-            console.error('Error fetching from food_images:', e)
-            await fetchFromProductsTable()
+            console.error('Error fetching products:', e)
+            setProducts([])
+            setFilteredProducts([])
+            setTotal(0)
         } finally {
             setLoading(false)
-        }
-    }
-
-    const fetchFromProductsTable = async () => {
-        try {
-            let url = 'http://localhost:3000/products?limit=100'
-            if (selectedRegion) url += `&region=${encodeURIComponent(selectedRegion)}`
-            if (selectedBrand) url += `&brand=${encodeURIComponent(selectedBrand)}`
-
-            const res = await fetch(url)
-            if (res.ok) {
-                const data: ProductsResponse = await res.json()
-                setProducts(data.products || [])
-                setFilteredProducts(data.products || [])
-                setTotal(data.total || 0)
-                setRegions(data.regions || [])
-                setBrands(data.brands || [])
-            } else {
-                // Fallback to localStorage
-                const stored = JSON.parse(localStorage.getItem('eatsmart_products') || '[]')
-                const mapped = stored.map((s: any) => ({
-                    id: s.id,
-                    product_name: s.name,
-                    image_url: s.url
-                }))
-                setProducts(mapped)
-                setFilteredProducts(mapped)
-            }
-        } catch (e) {
-            console.error('Failed to fetch products:', e)
-            // Fallback to localStorage
-            const stored = JSON.parse(localStorage.getItem('eatsmart_products') || '[]')
-            const mapped = stored.map((s: any) => ({
-                id: s.id,
-                product_name: s.name,
-                image_url: s.url
-            }))
-            setProducts(mapped)
-            setFilteredProducts(mapped)
         }
     }
 

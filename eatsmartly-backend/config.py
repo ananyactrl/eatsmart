@@ -38,7 +38,7 @@ class Settings(BaseSettings):
         description="Google API key (legacy, Vision uses service account)"
     )
     USDA_API_KEY: str = Field(
-        ...,
+        default="hCmEmvRajcsN5IOnaRaCnN0FHQdWb0QD8fc6dftT",
         description="USDA FoodData Central API key"
     )
     NUTRITIONIX_APP_ID: Optional[str] = Field(
@@ -138,7 +138,7 @@ class Settings(BaseSettings):
     @validator("DATABASE_URL")
     def validate_database_url(cls, v):
         """Validate database URL."""
-        if not v.startswith("postgresql://"):
+        if v is not None and not v.startswith("postgresql://"):
             raise ValueError("DATABASE_URL must start with 'postgresql://'")
         return v
     
