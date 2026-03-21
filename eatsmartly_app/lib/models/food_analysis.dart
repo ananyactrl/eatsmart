@@ -12,6 +12,7 @@ class FoodAnalysis {
   final List<Recipe> recipes;
   final List<String> nutritionTips;
   final DetailedNutrition? detailedNutrition;
+  final IngredientIntelligence? ingredientIntelligence;
   final String timestamp;
 
   FoodAnalysis({
@@ -28,6 +29,7 @@ class FoodAnalysis {
     required this.recipes,
     required this.nutritionTips,
     this.detailedNutrition,
+    this.ingredientIntelligence,
     required this.timestamp,
   });
 
@@ -52,7 +54,130 @@ class FoodAnalysis {
       detailedNutrition: json['detailed_nutrition'] != null
           ? DetailedNutrition.fromJson(json['detailed_nutrition'])
           : null,
+      ingredientIntelligence: json['ingredient_intelligence'] != null
+          ? IngredientIntelligence.fromJson(json['ingredient_intelligence'])
+          : null,
       timestamp: json['timestamp'] ?? DateTime.now().toIso8601String(),
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Ingredient Intelligence models
+// ---------------------------------------------------------------------------
+
+class IngredientIntelligence {
+  final String? productName;
+  final int totalIngredients;
+  final int ingredientsIdentified;
+  final int ingredientsUnknown;
+  final String overallConcern;
+  final double transparencyScore;
+  final int sourcesCited;
+  final String summary;
+  final List<IngredientWarning> warnings;
+  final List<DecodedIngredient> decodedIngredients;
+  final String disclaimer;
+
+  IngredientIntelligence({
+    this.productName,
+    required this.totalIngredients,
+    required this.ingredientsIdentified,
+    required this.ingredientsUnknown,
+    required this.overallConcern,
+    required this.transparencyScore,
+    required this.sourcesCited,
+    required this.summary,
+    required this.warnings,
+    required this.decodedIngredients,
+    required this.disclaimer,
+  });
+
+  factory IngredientIntelligence.fromJson(Map<String, dynamic> json) {
+    return IngredientIntelligence(
+      productName: json['product_name'],
+      totalIngredients: json['total_ingredients'] ?? 0,
+      ingredientsIdentified: json['ingredients_identified'] ?? 0,
+      ingredientsUnknown: json['ingredients_unknown'] ?? 0,
+      overallConcern: json['overall_concern'] ?? 'none',
+      transparencyScore: (json['transparency_score'] ?? 0).toDouble(),
+      sourcesCited: json['sources_cited'] ?? 0,
+      summary: json['summary'] ?? '',
+      warnings: (json['warnings'] as List? ?? [])
+          .map((w) => IngredientWarning.fromJson(w))
+          .toList(),
+      decodedIngredients: (json['decoded_ingredients'] as List? ?? [])
+          .map((i) => DecodedIngredient.fromJson(i))
+          .toList(),
+      disclaimer: json['disclaimer'] ?? '',
+    );
+  }
+}
+
+class IngredientWarning {
+  final String ingredient;
+  final String concern;
+
+  IngredientWarning({required this.ingredient, required this.concern});
+
+  factory IngredientWarning.fromJson(Map<String, dynamic> json) {
+    return IngredientWarning(
+      ingredient: json['ingredient'] ?? '',
+      concern: json['concern'] ?? '',
+    );
+  }
+}
+
+class DecodedIngredient {
+  final String name;
+  final int position;
+  final bool known;
+  final String? category;
+  final String? concernLevel;
+  final String? concernSummary;
+  final List<Map<String, dynamic>> regulatoryStatus;
+  final List<String> healthEffects;
+  final List<Map<String, dynamic>> sources;
+  final String? adi;
+  final String? eNumber;
+  final String plainExplanation;
+  final List<String> subIngredients;
+
+  DecodedIngredient({
+    required this.name,
+    required this.position,
+    required this.known,
+    this.category,
+    this.concernLevel,
+    this.concernSummary,
+    this.regulatoryStatus = const [],
+    this.healthEffects = const [],
+    this.sources = const [],
+    this.adi,
+    this.eNumber,
+    this.plainExplanation = '',
+    this.subIngredients = const [],
+  });
+
+  factory DecodedIngredient.fromJson(Map<String, dynamic> json) {
+    return DecodedIngredient(
+      name: json['name'] ?? '',
+      position: json['position'] ?? 0,
+      known: json['known'] ?? false,
+      category: json['category'],
+      concernLevel: json['concern_level'],
+      concernSummary: json['concern_summary'],
+      regulatoryStatus: (json['regulatory_status'] as List? ?? [])
+          .map((r) => Map<String, dynamic>.from(r))
+          .toList(),
+      healthEffects: List<String>.from(json['health_effects'] ?? []),
+      sources: (json['sources'] as List? ?? [])
+          .map((s) => Map<String, dynamic>.from(s))
+          .toList(),
+      adi: json['adi'],
+      eNumber: json['e_number'],
+      plainExplanation: json['plain_explanation'] ?? '',
+      subIngredients: List<String>.from(json['sub_ingredients'] ?? []),
     );
   }
 }

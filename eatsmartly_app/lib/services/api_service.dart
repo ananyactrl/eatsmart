@@ -5,11 +5,12 @@ import '../models/food_analysis.dart';
 
 class EatSmartlyAPI {
   // IMPORTANT: Change this based on your environment
-  // For local testing on physical device: use your PC's IP address (192.168.1.5)
+  // For local testing on physical device: use your PC's IP address (192.168.1.2)
   // For local testing on emulator: use 10.0.2.2
   // For production: use your deployed API URL
-  // Backend is running on port 3000 and includes OpenFoodFacts API integration
-  static const String baseUrl = 'http://192.168.1.5:3000';
+  // Backend is running on port 8000 (FastAPI with product search and RAG)
+  static const String baseUrl =
+      'http://192.168.1.2:8000'; // Use your PC's IP for physical devices
 
   // Timeout duration - increased for slow API responses
   static const Duration timeout = Duration(seconds: 60);
@@ -117,7 +118,7 @@ class EatSmartlyAPI {
     throw Exception('Failed after $maxRetries retries');
   }
 
-  /// Search food by name
+  /// Search food by name (LEGACY - use searchProducts instead)
   Future<Map<String, dynamic>> searchFood(String query, String userId,
       {int limit = 5}) async {
     try {
@@ -134,6 +135,53 @@ class EatSmartlyAPI {
         return json.decode(response.body);
       } else {
         throw Exception('Search failed: ${response.body}');
+      }
+    } catch (e) {
+      throw Exception('Network error: $e');
+    }
+  }
+
+  /// Search products - optimized for showing all available products
+  /// Returns products from local database (Amazon, BigBasket, etc) AND main database
+  /// Use this for the main search functionality in the app
+  Future<Map<String, dynamic>> searchProducts(String query,
+      {int limit = 20}) async {
+    try {
+      final response = await http
+          .post(
+            Uri.parse('$baseUrl/search-products'),
+            headers: {'Content-Type': 'application/json'},
+            body: json.encode({'query': query, 'limit': limit}),
+          )
+          .timeout(timeout);
+
+      if (response.statusCode == 200) {
+        return json.decode(response.body);
+      } else {
+        throw Exception('Search failed: ${response.body}');
+      }
+    } catch (e) {
+      throw Exception('Network error: $e');
+    }
+  }
+
+  /// Add a product to the database
+  /// Example: {'name': 'Barilla Pasta', 'brand': 'Barilla', 'calories': 131, ...}
+  Future<Map<String, dynamic>> addProduct(
+      Map<String, dynamic> productData) async {
+    try {
+      final response = await http
+          .post(
+            Uri.parse('$baseUrl/add-product'),
+            headers: {'Content-Type': 'application/json'},
+            body: json.encode(productData),
+          )
+          .timeout(timeout);
+
+      if (response.statusCode == 200) {
+        return json.decode(response.body);
+      } else {
+        throw Exception('Failed to add product: ${response.body}');
       }
     } catch (e) {
       throw Exception('Network error: $e');
@@ -213,6 +261,47 @@ class EatSmartlyAPI {
       return response.statusCode == 200;
     } catch (e) {
       return false;
+    }
+  }
+
+  /// Generate meal plan based on ingredients and preferences
+  Future<Map<String, dynamic>> generateMealPlan({
+    required List<String> availableIngredients,
+    required Map<String, dynamic> nutritionalGoals,
+    List<String>? dietaryRestrictions,
+    List<String>? cuisinePreferences,
+    required String mealType,
+    required int numMeals,
+    required int cookingTimeLimit,
+  }) async {
+    try {
+      final requestBody = {
+        'available_ingredients': availableIngredients,
+        'nutritional_goals': nutritionalGoals,
+        'dietary_restrictions': dietaryRestrictions ?? [],
+        'cuisine_preferences': cuisinePreferences ?? [],
+        'meal_type': mealType,
+        'num_meals': numMeals,
+        'cooking_time_limit': cookingTimeLimit,
+      };
+
+      final response = await http
+          .post(
+            Uri.parse('$baseUrl/meal-plan'),
+            headers: {'Content-Type': 'application/json'},
+            body: json.encode(requestBody),
+          )
+          .timeout(timeout);
+
+      if (response.statusCode == 200) {
+        return json.decode(response.body);
+      } else if (response.statusCode == 400) {
+        throw Exception('Invalid request parameters');
+      } else {
+        throw Exception('Failed to generate meal plan: ${response.body}');
+      }
+    } catch (e) {
+      throw Exception('Meal plan generation error: $e');
     }
   }
 }

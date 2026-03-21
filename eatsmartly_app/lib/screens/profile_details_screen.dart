@@ -6,6 +6,7 @@ import 'scanner_screen.dart';
 import '../widgets/bottom_nav.dart';
 import 'contact_nutritionist_screen.dart';
 import 'profile_form_screen.dart';
+import 'meal_planner_screen.dart';
 
 class ProfileDetailsScreen extends StatefulWidget {
   final Map<String, dynamic> profile;
@@ -311,6 +312,10 @@ class _ProfileDetailsScreenState extends State<ProfileDetailsScreen> {
                   context,
                   MaterialPageRoute(
                       builder: (_) => const ContactNutritionistScreen()));
+              break;
+            case 3:
+              Navigator.push(context,
+                  MaterialPageRoute(builder: (_) => const MealPlannerScreen()));
               break;
             case 4:
               Navigator.push(context,

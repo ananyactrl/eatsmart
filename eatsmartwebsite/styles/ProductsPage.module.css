@@ -4,9 +4,11 @@
     padding: 0;
     margin: 0 -24px;
     /* Offset the body padding */
-    width: calc(100% + 48px);
-    /* Account for body padding on both sides */
+    width: calc(100vw - 16px);
+    /* Full viewport width minus body padding */
     position: relative;
+    left: 50%;
+    transform: translateX(-50%);
 }
 
 /* Hero Section */
@@ -34,10 +36,11 @@
 }
 
 .heroContent {
-    max-width: 900px;
+    max-width: none;
     margin: 0 auto;
     position: relative;
     z-index: 1;
+    padding: 0 40px;
 }
 
 .heroTitle {
@@ -60,7 +63,7 @@
 
 /* Search Form */
 .searchForm {
-    max-width: 640px;
+    max-width: 800px;
     margin: 0 auto;
 }
 
@@ -132,9 +135,9 @@
 }
 
 .filtersContainer {
-    max-width: 100%;
+    max-width: none;
     margin: 0;
-    padding: 0 24px;
+    padding: 0 40px;
 }
 
 .filtersHeader {
@@ -238,20 +241,20 @@
 
 /* Products Section */
 .productsSection {
-    padding: 48px 24px;
+    padding: 48px 40px;
     width: 100%;
 }
 
 .productsContainer {
-    max-width: 100%;
+    max-width: none;
     margin: 0;
     padding: 0;
 }
 
 .productsGrid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
-    gap: 24px;
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    gap: 32px;
     width: 100%;
 }
 
@@ -312,10 +315,57 @@
     margin: 0 0 24px 0;
 }
 
-/* Responsive Design */
+/* Updated grid for 4 products per row - v2 */
 @media (min-width: 1400px) {
     .productsGrid {
         grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+    }
+}
+
+@media (min-width: 800px) {
+    .productsMain {
+        margin: 0 -24px;
+        width: calc(100vw - 16px);
+        left: 50%;
+        transform: translateX(-50%);
+    }
+
+    .productsHero {
+        padding: 80px 80px 60px;
+    }
+
+    .heroContent {
+        max-width: none;
+        margin: 0;
+        padding: 0 40px;
+    }
+
+    .filtersSection {
+        padding: 40px 80px;
+    }
+
+    .filtersContainer {
+        max-width: none;
+        margin: 0;
+        padding: 0;
+    }
+
+    .productsSection {
+        padding: 60px 80px;
+    }
+
+    .productsContainer {
+        max-width: none;
+        margin: 0;
+    }
+
+    .productsGrid {
+        grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+        gap: 60px;
+    }
+
+    .searchForm {
+        max-width: none;
     }
 }
 

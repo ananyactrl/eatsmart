@@ -97,6 +97,20 @@ class Settings(BaseSettings):
         default=None,
         description="OCR.space API key for OCR service"
     )
+
+    # Ollama (local LLM — free, open-source)
+    OLLAMA_BASE_URL: str = Field(
+        default="http://localhost:11434",
+        description="Ollama server URL (local by default)"
+    )
+    OLLAMA_MODEL: str = Field(
+        default="llama3.1:8b",
+        description="Ollama model to use (llama3.1:8b recommended)"
+    )
+    OLLAMA_TIMEOUT: int = Field(
+        default=30,
+        description="Ollama request timeout in seconds"
+    )
     
     # Application
     DEBUG: bool = Field(default=False)

@@ -2,9 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../services/api_service.dart';
-import '../services/ocr_service.dart';
-import '../services/ocr_parser.dart';
-import '../models/food_analysis.dart';
 import '../theme.dart';
 import 'result_screen.dart';
 
@@ -249,112 +246,16 @@ class _ScannerScreenState extends State<ScannerScreen> {
                   child: const Icon(Icons.flip_camera_ios, color: Colors.white),
                 ),
 
-                // OCR capture
+                // OCR capture (disabled - requires mobile_scanner 7.0+ with takePicture support)
                 FloatingActionButton(
                   heroTag: 'ocr',
-                  backgroundColor: const Color(0xFFFFC1CC),
-                  onPressed: isOcrProcessing
-                      ? null
-                      : () async {
-                          try {
-                            setState(() {
-                              isOcrProcessing = true;
-                              statusMessage = 'Capturing image for OCR...';
-                            });
-
-                            // Use dynamic call to avoid analyzer issues across
-                            // mobile_scanner versions while still invoking
-                            // the runtime method when available.
-                            final xfile = await (cameraController as dynamic)
-                                .takePicture();
-                            if (xfile == null)
-                              throw Exception('Failed to capture image');
-
-                            setState(() {
-                              statusMessage = 'Running on-device OCR...';
-                            });
-
-                            final recognized =
-                                await recognizeTextFromFile(xfile.path);
-
-                            setState(() {
-                              statusMessage = 'Parsing nutrition values...';
-                            });
-
-                            final result =
-                                parseNutritionFromRecognizedText(recognized);
-
-                            // Build a minimal FoodAnalysis to show results
-                            final analysis = FoodAnalysis(
-                              barcode: 'ocr',
-                              foodName: null,
-                              brand: null,
-                              verdict: 'unknown',
-                              riskLevel: 'unknown',
-                              healthScore: 0,
-                              alerts: [],
-                              warnings: [],
-                              suggestions: [],
-                              alternatives: [],
-                              recipes: [],
-                              nutritionTips: [],
-                              detailedNutrition: result.nutrition,
-                              timestamp: DateTime.now().toIso8601String(),
-                            );
-
-                            if (!result.confident && mounted) {
-                              // Offer guided capture flow when confidence is low
-                              final takeMore = await showDialog<bool>(
-                                context: context,
-                                builder: (context) => AlertDialog(
-                                  title: const Text('Partial recognition'),
-                                  content: Text(
-                                      'We could only detect ${result.foundCount} key values.\nWould you like to take a few more photos (nutrition table, ingredients, front) to improve accuracy?'),
-                                  actions: [
-                                    TextButton(
-                                      onPressed: () =>
-                                          Navigator.of(context).pop(true),
-                                      child: const Text('Take more photos'),
-                                    ),
-                                    TextButton(
-                                      onPressed: () =>
-                                          Navigator.of(context).pop(false),
-                                      child: const Text('Continue anyway'),
-                                    ),
-                                  ],
-                                ),
-                              );
-
-                              if (takeMore == true) {
-                                // Let user continue capturing; just return to scanner.
-                                if (mounted) setState(() {});
-                                return;
-                              }
-                            }
-
-                            if (mounted) {
-                              Navigator.push(
-                                context,
-                                MaterialPageRoute(
-                                  builder: (context) =>
-                                      ResultScreen(analysis: analysis),
-                                ),
-                              );
-                            }
-                          } catch (e) {
-                            if (mounted) {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                SnackBar(content: Text(e.toString())),
-                              );
-                            }
-                          } finally {
-                            if (mounted)
-                              setState(() => isOcrProcessing = false);
-                          }
-                        },
-                  child: isOcrProcessing
-                      ? const CircularProgressIndicator(color: Colors.white)
-                      : const Icon(Icons.text_snippet, color: Colors.white),
+                  backgroundColor: const Color(0xFFFFC1CC).withOpacity(0.5),
+                  onPressed:
+                      null, // Disabled - upgrade mobile_scanner to enable
+                  child: const Opacity(
+                    opacity: 0.5,
+                    child: Icon(Icons.text_snippet, color: Colors.white),
+                  ),
                 ),
               ],
             ),

@@ -5,7 +5,9 @@ import '../theme.dart';
 import 'result_screen.dart';
 
 class SearchScreen extends StatefulWidget {
-  const SearchScreen({Key? key}) : super(key: key);
+  final String? initialQuery;
+
+  const SearchScreen({Key? key, this.initialQuery}) : super(key: key);
 
   @override
   State<SearchScreen> createState() => _SearchScreenState();
@@ -14,7 +16,20 @@ class SearchScreen extends StatefulWidget {
 class _SearchScreenState extends State<SearchScreen> {
   final EatSmartlyAPI api = EatSmartlyAPI();
   final String userId = 'test_user';
-  final TextEditingController _searchController = TextEditingController();
+  late TextEditingController _searchController;
+
+  @override
+  void initState() {
+    super.initState();
+    _searchController = TextEditingController();
+    // If an initial query is provided, auto-search for it
+    if (widget.initialQuery != null && widget.initialQuery!.isNotEmpty) {
+      _searchController.text = widget.initialQuery!;
+      Future.delayed(const Duration(milliseconds: 500), () {
+        _performSearch(widget.initialQuery!);
+      });
+    }
+  }
 
   bool isSearching = false;
   List<Map<String, dynamic>> searchResults = [];
@@ -42,7 +57,8 @@ class _SearchScreenState extends State<SearchScreen> {
     });
 
     try {
-      final result = await api.searchFood(query, userId, limit: 20);
+      // Use new comprehensive search that includes local database
+      final result = await api.searchProducts(query, limit: 20);
 
       if (!mounted) return;
       setState(() {
@@ -62,43 +78,45 @@ class _SearchScreenState extends State<SearchScreen> {
 
   Future<void> _analyzeProduct(Map<String, dynamic> product) async {
     try {
+      final String productName = product['name'] ?? 'Unknown';
+      final String? barcode = product['barcode'];
+      final dynamic productId = product['id'];
+
       FoodAnalysis analysis;
 
-      // Check if product has barcode
-      final barcode = product['barcode'];
-      final productId = product['id'];
-      final productName = product['name'];
-
+      // Try to analyze using barcode first
       if (barcode != null && barcode.toString().isNotEmpty) {
-        // Use barcode analysis
         analysis = await api.analyzeBarcode(
             barcode: barcode, userId: userId, detailed: true);
       } else if (productId != null) {
-        // Use product ID analysis
+        // Use product ID (can be string or int)
         analysis = await api.analyzeProduct(
-            productId: productId, userId: userId, detailed: true);
-      } else if (productName != null) {
-        // Use product name analysis
+            productId: productId is int
+                ? productId
+                : int.tryParse(productId.toString()),
+            userId: userId,
+            detailed: true);
+      } else {
+        // Use product name
         analysis = await api.analyzeProduct(
             productName: productName, userId: userId, detailed: true);
-      } else {
-        throw Exception('Product has no barcode, ID, or name');
       }
 
       if (!mounted) return;
       Navigator.push(
         context,
         MaterialPageRoute(
-          builder: (context) => ResultScreen(analysis: analysis),
+          builder: (context) =>
+              ResultScreen(analysis: analysis, productImage: product),
         ),
       );
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(
-              'Error analyzing ${product['name'] ?? 'product'}: ${e.toString()}'),
-          backgroundColor: AppColors.error,
+          content: Text('Error loading product details: ${e.toString()}'),
+          backgroundColor: const Color(0xFFE53935),
+          duration: const Duration(seconds: 3),
         ),
       );
     }
@@ -107,17 +125,19 @@ class _SearchScreenState extends State<SearchScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      backgroundColor: const Color(0xFFFFF8E1),
       appBar: AppBar(
-        title: const Text('Search Food Products'),
+        title: const Text('Search Results'),
         elevation: 0,
+        backgroundColor: const Color(0xFFFFC1CC),
       ),
       body: Column(
         children: [
-          // Search bar
+          // Search bar with pink theme
           Container(
             padding: const EdgeInsets.all(16),
             decoration: BoxDecoration(
-              color: AppColors.primary,
+              color: const Color(0xFFFFC1CC),
               boxShadow: [
                 BoxShadow(
                   color: Colors.black.withOpacity(0.1),
@@ -128,14 +148,14 @@ class _SearchScreenState extends State<SearchScreen> {
             ),
             child: TextField(
               controller: _searchController,
-              style: const TextStyle(color: Colors.white),
+              style: const TextStyle(color: Colors.black87),
               decoration: InputDecoration(
-                hintText: 'Search by product name (e.g., "amul butter")',
-                hintStyle: TextStyle(color: Colors.white.withOpacity(0.7)),
-                prefixIcon: const Icon(Icons.search, color: Colors.white),
+                hintText: 'Search by product name',
+                hintStyle: TextStyle(color: Colors.black.withOpacity(0.5)),
+                prefixIcon: const Icon(Icons.search, color: Colors.black54),
                 suffixIcon: _searchController.text.isNotEmpty
                     ? IconButton(
-                        icon: const Icon(Icons.clear, color: Colors.white),
+                        icon: const Icon(Icons.clear, color: Colors.black54),
                         onPressed: () {
                           _searchController.clear();
                           _performSearch('');
@@ -143,14 +163,14 @@ class _SearchScreenState extends State<SearchScreen> {
                       )
                     : null,
                 filled: true,
-                fillColor: Colors.white.withOpacity(0.2),
+                fillColor: Colors.white,
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(30),
                   borderSide: BorderSide.none,
                 ),
               ),
               onChanged: (value) {
-                // Debounce search
+                setState(() {});
                 Future.delayed(const Duration(milliseconds: 500), () {
                   if (_searchController.text == value) {
                     _performSearch(value);
@@ -295,12 +315,27 @@ class _SearchScreenState extends State<SearchScreen> {
     final String name = product['name'] ?? 'Unknown Product';
     final String? brand = product['brand'];
     final double? calories = product['calories']?.toDouble();
-    final double? protein = product['protein_g']?.toDouble();
+    final String? source = product['source'];
+
+    // Check if it's a pasta product - include all pasta types
+    final String nameLower = name.toLowerCase();
+    final String brandLower = brand?.toLowerCase() ?? '';
+    final bool isPasta = nameLower.contains('pasta') ||
+        nameLower.contains('spaghetti') ||
+        nameLower.contains('penne') ||
+        nameLower.contains('fusilli') ||
+        nameLower.contains('rigate') ||
+        nameLower.contains('noodles') ||
+        nameLower.contains('macaroni') ||
+        brandLower.contains('pasta') ||
+        brandLower.contains('barilla') ||
+        brandLower.contains('fortune');
 
     return Card(
       margin: const EdgeInsets.only(bottom: 12),
       elevation: 2,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      color: Colors.white,
       child: InkWell(
         onTap: () => _analyzeProduct(product),
         borderRadius: BorderRadius.circular(12),
@@ -308,19 +343,36 @@ class _SearchScreenState extends State<SearchScreen> {
           padding: const EdgeInsets.all(16),
           child: Row(
             children: [
-              // Product icon
+              // Product icon/image box
               Container(
                 width: 56,
                 height: 56,
                 decoration: BoxDecoration(
-                  color: AppColors.surfaceVariant,
+                  color: const Color(0xFFFFC1CC),
                   borderRadius: BorderRadius.circular(12),
+                  border: Border.all(
+                    color: const Color(0xFFFFEFF1),
+                    width: 2,
+                  ),
                 ),
-                child: Icon(
-                  Icons.fastfood,
-                  color: AppColors.primary,
-                  size: 32,
-                ),
+                child: isPasta
+                    ? ClipRRect(
+                        borderRadius: BorderRadius.circular(10),
+                        child: Image.asset(
+                          'asset/kitchen poster for pasta lover minimal illustration art line art.jpeg',
+                          fit: BoxFit.cover,
+                          errorBuilder: (c, e, s) => Icon(
+                            Icons.fastfood,
+                            color: Colors.white,
+                            size: 28,
+                          ),
+                        ),
+                      )
+                    : Icon(
+                        Icons.fastfood,
+                        color: Colors.white,
+                        size: 28,
+                      ),
               ),
               const SizedBox(width: 16),
 
@@ -334,75 +386,47 @@ class _SearchScreenState extends State<SearchScreen> {
                       style: const TextStyle(
                         fontSize: 16,
                         fontWeight: FontWeight.bold,
-                        color: AppColors.textPrimary,
+                        color: Color(0xFF4C0004),
                       ),
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
                     ),
                     if (brand != null) ...[
                       const SizedBox(height: 4),
                       Text(
                         brand,
-                        style: TextStyle(
-                          fontSize: 14,
-                          color: AppColors.textSecondary,
+                        style: const TextStyle(
+                          fontSize: 13,
+                          color: Color(0xFFAFA231),
                         ),
                       ),
                     ],
-                    if (calories != null || protein != null) ...[
-                      const SizedBox(height: 8),
-                      Row(
-                        children: [
-                          if (calories != null)
-                            Container(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 8,
-                                vertical: 4,
-                              ),
-                              decoration: BoxDecoration(
-                                color: AppColors.primary.withOpacity(0.1),
-                                borderRadius: BorderRadius.circular(4),
-                              ),
-                              child: Text(
-                                '${calories.toInt()} kcal',
-                                style: const TextStyle(
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.w600,
-                                  color: AppColors.primary,
-                                ),
-                              ),
-                            ),
-                          if (protein != null) ...[
-                            const SizedBox(width: 8),
-                            Container(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 8,
-                                vertical: 4,
-                              ),
-                              decoration: BoxDecoration(
-                                color: AppColors.success.withOpacity(0.1),
-                                borderRadius: BorderRadius.circular(4),
-                              ),
-                              child: Text(
-                                '${protein.toStringAsFixed(1)}g protein',
-                                style: const TextStyle(
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.w600,
-                                  color: AppColors.success,
-                                ),
-                              ),
-                            ),
-                          ],
-                        ],
+                    const SizedBox(height: 6),
+                    if (calories != null)
+                      Text(
+                        '${calories.toStringAsFixed(0)} cal',
+                        style: const TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
+                          color: Color(0xFF4C0004),
+                        ),
                       ),
-                    ],
+                    if (source != null)
+                      Text(
+                        'From: $source',
+                        style: const TextStyle(
+                          fontSize: 11,
+                          color: Colors.grey,
+                        ),
+                      ),
                   ],
                 ),
               ),
-
-              // Arrow icon
+              // Right arrow indicator
               Icon(
-                Icons.arrow_forward_ios,
-                size: 16,
-                color: AppColors.textLight,
+                Icons.chevron_right,
+                color: const Color(0xFFAFA231),
+                size: 28,
               ),
             ],
           ),

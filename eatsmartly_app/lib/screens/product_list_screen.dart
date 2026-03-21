@@ -2,9 +2,11 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'product_detail_screen.dart';
 import 'scanner_screen.dart';
+import 'search_screen.dart';
 import '../widgets/bottom_nav.dart';
 import 'contact_nutritionist_screen.dart';
 import 'profile_form_screen.dart';
+import 'meal_planner_screen.dart';
 
 Widget _categoryChip(String label) {
   return Container(
@@ -31,8 +33,38 @@ Widget _categoryChip(String label) {
   );
 }
 
-class ProductListScreen extends StatelessWidget {
+class ProductListScreen extends StatefulWidget {
   const ProductListScreen({Key? key}) : super(key: key);
+
+  @override
+  State<ProductListScreen> createState() => _ProductListScreenState();
+}
+
+class _ProductListScreenState extends State<ProductListScreen> {
+  late TextEditingController _searchController;
+
+  @override
+  void initState() {
+    super.initState();
+    _searchController = TextEditingController();
+  }
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
+
+  void _navigateToSearch(String query) {
+    if (query.trim().isNotEmpty) {
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (context) => SearchScreen(initialQuery: query),
+        ),
+      );
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -108,6 +140,7 @@ class ProductListScreen extends StatelessWidget {
                               borderRadius: BorderRadius.circular(12),
                             ),
                             child: TextField(
+                              controller: _searchController,
                               decoration: InputDecoration(
                                 prefixIcon: const Icon(Icons.search,
                                     color: Colors.black54),
@@ -116,6 +149,7 @@ class ProductListScreen extends StatelessWidget {
                                 contentPadding:
                                     const EdgeInsets.symmetric(vertical: 14),
                               ),
+                              onSubmitted: _navigateToSearch,
                             ),
                           ),
                         ),
@@ -243,6 +277,10 @@ class ProductListScreen extends StatelessWidget {
                   context,
                   MaterialPageRoute(
                       builder: (_) => const ContactNutritionistScreen()));
+              break;
+            case 3:
+              Navigator.push(context,
+                  MaterialPageRoute(builder: (_) => const MealPlannerScreen()));
               break;
             case 4:
               Navigator.push(context,

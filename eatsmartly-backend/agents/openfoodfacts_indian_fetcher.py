@@ -9,6 +9,7 @@ import logging
 from typing import Dict, List, Optional
 from datetime import datetime
 import re
+from knowledge.ingredient_translator import translate_ingredient, translate_ingredients
 
 logger = logging.getLogger(__name__)
 
@@ -57,7 +58,9 @@ class OpenFoodFactsIndiaFetcher:
                     'page_size': page_size,
                     'page': page,
                     'countries_tags': 'en:india',
-                    'sort_by': 'unique_scans_n'  # Most scanned products first
+                    'sort_by': 'unique_scans_n',  # Most scanned products first
+                    'lc': 'en',  # Request English language content
+                    'fields': 'product_name,code,brands,categories_tags,nutriments,ingredients_text_en,allergens_tags,nutriscore_grade,nova_group,ecoscore_grade'
                 }
                 
                 response = requests.get(url, params=params, headers=self.headers, timeout=30)
@@ -136,7 +139,9 @@ class OpenFoodFactsIndiaFetcher:
                 'vitamin_c_mg': nutriments.get('vitamin-c_100g'),
                 
                 # Ingredients and allergens
-                'ingredients': raw_product.get('ingredients_text_en', ''),
+                'ingredients': self._translate_and_normalize_ingredients(
+                    raw_product.get('ingredients_text_en', '')
+                ),
                 'allergens': self._extract_allergens(raw_product),
                 
                 # Serving info
@@ -185,6 +190,36 @@ class OpenFoodFactsIndiaFetcher:
         
         # Return first category if no match
         return readable_categories[0].lower() if readable_categories else 'uncategorized'
+    
+    def _translate_and_normalize_ingredients(self, ingredients_text: str) -> str:
+        """
+        Translate and normalize ingredient text to English
+        Handles multi-language ingredients and ensures English output
+        """
+        if not ingredients_text:
+            return ''
+        
+        try:
+            # Split ingredients by comma
+            ingredient_list = [ing.strip() for ing in ingredients_text.split(',')]
+            
+            # Translate each ingredient to English
+            translated_list = []
+            for ingredient in ingredient_list:
+                if ingredient:
+                    # Translate the ingredient
+                    english_ingredient = translate_ingredient(ingredient)
+                    translated_list.append(english_ingredient)
+            
+            # Join back together
+            normalized_text = ', '.join(translated_list)
+            logger.debug(f"Translated ingredients: {ingredients_text[:100]} -> {normalized_text[:100]}")
+            
+            return normalized_text
+            
+        except Exception as e:
+            logger.warning(f"Error translating ingredients: {e}, returning original")
+            return ingredients_text
     
     def _extract_allergens(self, product: Dict) -> List[str]:
         """

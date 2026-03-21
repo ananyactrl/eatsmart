@@ -9,6 +9,7 @@ import os
 
 from config import settings
 from agents.utils import setup_logger
+from knowledge.ingredient_translator import translate_ingredient
 
 
 logger = setup_logger(__name__, settings.LOG_LEVEL)
@@ -95,6 +96,15 @@ class IngredientAnalysisAgent:
         """
         if not ingredients:
             return {"analysis": "No ingredients provided", "warnings": [], "score": 0}
+
+        # Translate ingredients to English first (handles multi-language ingredients)
+        try:
+            ingredient_list = [ing.strip() for ing in ingredients.split(',')]
+            translated_list = [translate_ingredient(ing) for ing in ingredient_list if ing.strip()]
+            ingredients = ', '.join(translated_list)
+            logger.debug(f"Translated ingredients for analysis: {ingredients[:100]}")
+        except Exception as e:
+            logger.warning(f"Error translating ingredients for analysis: {e}, proceeding with original")
 
         ingredients_lower = ingredients.lower()
         product_name_lower = product_name.lower()

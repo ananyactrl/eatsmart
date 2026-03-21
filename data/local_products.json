@@ -1,0 +1,66 @@
+{
+  "products": [
+    {
+      "name": "Barilla Penne Pasta",
+      "brand": "Barilla",
+      "barcode": "8076808000062",
+      "calories": 131.0,
+      "protein_g": 5.0,
+      "carbs_g": 25.0,
+      "fat_g": 1.1,
+      "sugar_g": 1.2,
+      "source": "amazon",
+      "id": "local_1774103371.279332",
+      "added_at": "2026-03-21T19:59:31.280346"
+    },
+    {
+      "name": "Maggi Noodles (Masala)",
+      "brand": "Maggi",
+      "barcode": "8901234567890",
+      "calories": 380.0,
+      "protein_g": 12.0,
+      "carbs_g": 65.0,
+      "fat_g": 9.0,
+      "sugar_g": 2.0,
+      "source": "amazon",
+      "id": "local_1774103373.325067",
+      "added_at": "2026-03-21T19:59:33.325067"
+    },
+    {
+      "name": "Bournvita Chocolate Drink Powder",
+      "brand": "Bournvita",
+      "calories": 400.0,
+      "protein_g": 8.0,
+      "carbs_g": 70.0,
+      "fat_g": 10.0,
+      "sugar_g": 60.0,
+      "source": "amazon",
+      "id": "local_1774103375.363193",
+      "added_at": "2026-03-21T19:59:35.363193"
+    },
+    {
+      "name": "Fortune Pasta (Fusilli)",
+      "brand": "Fortune",
+      "calories": 128.0,
+      "protein_g": 4.5,
+      "carbs_g": 25.0,
+      "fat_g": 1.0,
+      "sugar_g": 1.5,
+      "source": "amazon",
+      "id": "local_1774103377.407741",
+      "added_at": "2026-03-21T19:59:37.407741"
+    },
+    {
+      "name": "Debonairs Pizza Masala",
+      "brand": "Debonairs",
+      "calories": 120.0,
+      "protein_g": 5.0,
+      "carbs_g": 20.0,
+      "fat_g": 2.0,
+      "source": "amazon",
+      "id": "local_1774103379.451981",
+      "added_at": "2026-03-21T19:59:39.451981"
+    }
+  ],
+  "updated_at": "2026-03-21T19:59:39.451981"
+}

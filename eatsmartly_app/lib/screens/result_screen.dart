@@ -1,11 +1,17 @@
 import 'package:flutter/material.dart';
 import '../models/food_analysis.dart';
 import '../theme.dart';
+import '../widgets/ingredient_intelligence_card.dart';
 
 class ResultScreen extends StatelessWidget {
   final FoodAnalysis analysis;
+  final Map<String, dynamic>? productImage;
 
-  const ResultScreen({Key? key, required this.analysis}) : super(key: key);
+  const ResultScreen({
+    Key? key,
+    required this.analysis,
+    this.productImage,
+  }) : super(key: key);
 
   Color _getVerdictColor() {
     switch (analysis.verdict.toLowerCase()) {
@@ -36,12 +42,14 @@ class ResultScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final verdictColor = _getVerdictColor();
+    final isPasta = (analysis.foodName ?? '').toLowerCase().contains('pasta');
 
     return Scaffold(
-      backgroundColor: AppColors.background,
+      backgroundColor: const Color(0xFFFFF8E1),
       appBar: AppBar(
         title: const Text('Analysis Result'),
         elevation: 0,
+        backgroundColor: const Color(0xFFFFC1CC),
         actions: [
           IconButton(
             icon: const Icon(Icons.share),
@@ -56,6 +64,28 @@ class ResultScreen extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            // Product image for pasta
+            if (isPasta)
+              Container(
+                width: double.infinity,
+                height: 180,
+                color: const Color(0xFFFFC1CC),
+                child: ClipRRect(
+                  child: Image.asset(
+                    'asset/kitchen poster for pasta lover minimal illustration art line art.jpeg',
+                    fit: BoxFit.cover,
+                    errorBuilder: (c, e, s) => Container(
+                      color: const Color(0xFFFFEFF1),
+                      child: const Icon(
+                        Icons.fastfood,
+                        size: 80,
+                        color: Color(0xFFFFC1CC),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+
             // Hero header with gradient
             Container(
               width: double.infinity,
@@ -64,8 +94,8 @@ class ResultScreen extends StatelessWidget {
                   begin: Alignment.topLeft,
                   end: Alignment.bottomRight,
                   colors: [
-                    verdictColor.withOpacity(0.2),
-                    verdictColor.withOpacity(0.05),
+                    const Color(0xFFFFC1CC).withOpacity(0.3),
+                    const Color(0xFFFFEFF1).withOpacity(0.2),
                   ],
                 ),
               ),
@@ -80,7 +110,7 @@ class ResultScreen extends StatelessWidget {
                       style: const TextStyle(
                         fontSize: 28,
                         fontWeight: FontWeight.bold,
-                        color: AppColors.textPrimary,
+                        color: Color(0xFF4C0004),
                         height: 1.2,
                       ),
                     ),
@@ -92,7 +122,7 @@ class ResultScreen extends StatelessWidget {
                           vertical: 6,
                         ),
                         decoration: BoxDecoration(
-                          color: AppColors.primary.withOpacity(0.1),
+                          color: const Color(0xFFFFC1CC).withOpacity(0.2),
                           borderRadius: BorderRadius.circular(12),
                         ),
                         child: Text(
@@ -100,7 +130,7 @@ class ResultScreen extends StatelessWidget {
                           style: const TextStyle(
                             fontSize: 16,
                             fontWeight: FontWeight.w600,
-                            color: AppColors.primary,
+                            color: Color(0xFFAFA231),
                           ),
                         ),
                       ),
@@ -213,6 +243,17 @@ class ResultScreen extends StatelessWidget {
                   analysis.nutritionTips,
                   AppColors.success,
                   Icons.tips_and_updates,
+                ),
+              ),
+            ],
+
+            // Ingredient Intelligence
+            if (analysis.ingredientIntelligence != null) ...[
+              const SizedBox(height: 16),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                child: IngredientIntelligenceCard(
+                  intelligence: analysis.ingredientIntelligence!,
                 ),
               ),
             ],
@@ -744,6 +785,9 @@ class ResultScreen extends StatelessWidget {
     IconData icon,
   ) {
     return Card(
+      color: Colors.white,
+      elevation: 2,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
@@ -751,43 +795,61 @@ class ResultScreen extends StatelessWidget {
           children: [
             Row(
               children: [
-                Icon(icon, color: color, size: 24),
-                const SizedBox(width: 8),
-                Text(
-                  title,
-                  style: TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.bold,
-                    color: AppColors.textPrimary,
+                Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: color.withOpacity(0.15),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Icon(icon, color: color, size: 20),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    title,
+                    style: TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                      color: color,
+                    ),
                   ),
                 ),
               ],
             ),
-            const SizedBox(height: 12),
-            ...items.map((item) => Padding(
-                  padding: const EdgeInsets.only(bottom: 8),
-                  child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Container(
-                        margin: const EdgeInsets.only(top: 6),
-                        width: 6,
-                        height: 6,
-                        decoration: BoxDecoration(
-                          color: color,
-                          shape: BoxShape.circle,
+            const SizedBox(height: 16),
+            ...items.asMap().entries.map((entry) {
+              int index = entry.key;
+              String item = entry.value;
+              return Padding(
+                padding:
+                    EdgeInsets.only(bottom: index == items.length - 1 ? 0 : 12),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Container(
+                      margin: const EdgeInsets.only(top: 6),
+                      width: 8,
+                      height: 8,
+                      decoration: BoxDecoration(
+                        color: color,
+                        shape: BoxShape.circle,
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Text(
+                        item,
+                        style: const TextStyle(
+                          fontSize: 15,
+                          height: 1.4,
+                          color: Color(0xFF333333),
                         ),
                       ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Text(
-                          item,
-                          style: const TextStyle(fontSize: 15),
-                        ),
-                      ),
-                    ],
-                  ),
-                )),
+                    ),
+                  ],
+                ),
+              );
+            }),
           ],
         ),
       ),

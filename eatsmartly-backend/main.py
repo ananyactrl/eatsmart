@@ -2,7 +2,7 @@
 EatSmartly Backend - FastAPI Application with Multi-Agent System.
 Main entry point for the barcode food analyzer API.
 """
-from fastapi import FastAPI, HTTPException, status, UploadFile, File, Request
+from fastapi import FastAPI, HTTPException, status, UploadFile, File, Request, BackgroundTasks
 from fastapi.staticfiles import StaticFiles
 import shutil
 from fastapi.middleware.cors import CORSMiddleware
@@ -15,14 +15,28 @@ from PIL import Image
 import io
 import requests
 import time
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
 
 from config import settings
 from agents.data_collection import DataCollectionAgent
 from agents.web_scraping import WebScrapingAgent
 from agents.personalization import PersonalizationAgent
 from agents.ingredient_analyzer import IngredientAnalysisAgent
+from agents.meal_planner import get_meal_planner
 # from agents.autogen_orchestrator import AutoGenOrchestrator  # Temporarily disabled
 from agents.utils import setup_logger
+
+# Ingredient Intelligence System
+from knowledge.decode_service import decode_ingredients, quick_decode, compare_products
+from knowledge.regulatory_db import (
+    lookup_ingredient, search_ingredients, get_database_stats,
+    get_ingredients_by_concern, get_ingredients_by_category,
+    ConcernLevel, IngredientCategory,
+)
+from knowledge.ingredient_parser import parse_ingredient_list, extract_ingredient_names
 import asyncio
 from sqlalchemy import text
 from vision_usage_tracker import get_usage_tracker
@@ -137,12 +151,32 @@ async def startup_event():
                 logger.warning(f"Database reachable but test query failed: {db_e}")
         else:
             logger.warning("No database engine available — running without DB")
+        
+        # Initialize background tasks (product scraper)
+        try:
+            from knowledge.background_scheduler import initialize_background_tasks
+            logger.info("Initializing background tasks...")
+            await initialize_background_tasks()
+        except Exception as bg_e:
+            logger.warning(f"Could not initialize background tasks: {bg_e}")
 
     except Exception as e:
         logger.error(f"Startup initialization error: {e}")
         data_agent = None
         scraping_agent = None
         personalization_agent = None
+
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    """Shut down background tasks and cleanup on application shutdown."""
+    try:
+        from knowledge.background_scheduler import shutdown_background_tasks
+        logger.info("Shutting down background tasks...")
+        await shutdown_background_tasks()
+    except Exception as e:
+        logger.warning(f"Error during shutdown: {e}")
+
 
 def preprocess_image(image_bytes: bytes) -> bytes:
     """
@@ -307,6 +341,7 @@ class FoodAnalysisResponse(BaseModel):
     recipes: List[Dict[str, Any]]
     nutrition_tips: List[str]
     detailed_nutrition: Optional[Dict[str, Any]] = None
+    ingredient_intelligence: Optional[Dict[str, Any]] = None  # Decoded ingredient label with source citations
     timestamp: str
 
 
@@ -524,6 +559,22 @@ async def analyze_barcode(request: BarcodeAnalysisRequest):
                 "data_variance": analysis.get("data_quality", {}).get("variance", 0)
             }
         
+        # === INGREDIENT INTELLIGENCE ===
+        # Decode the ingredient list against regulatory knowledge base
+        ingredient_intel = None
+        ingredients_text = product_data.get("ingredients") or analysis.get("ingredients", "")
+        if ingredients_text:
+            try:
+                ingredient_intel = quick_decode(
+                    ingredient_text=ingredients_text,
+                    product_name=analysis.get("product_name", ""),
+                )
+                logger.info(f"🧪 Ingredient Intelligence: {ingredient_intel.get('ingredients_identified', 0)}/{ingredient_intel.get('total_ingredients', 0)} identified, "
+                            f"concern={ingredient_intel.get('overall_concern', 'none')}, "
+                            f"sources={ingredient_intel.get('sources_cited', 0)}")
+            except Exception as e:
+                logger.warning(f"Ingredient decode failed (non-critical): {e}")
+
         # Build response
         response = FoodAnalysisResponse(
             barcode=request.barcode,
@@ -539,6 +590,7 @@ async def analyze_barcode(request: BarcodeAnalysisRequest):
             recipes=analysis.get("recipes", []),
             nutrition_tips=analysis.get("nutrition_tips", []),
             detailed_nutrition=detailed_nutrition,
+            ingredient_intelligence=ingredient_intel,
             timestamp=analysis.get("analysis_timestamp")
         )
         
@@ -658,6 +710,18 @@ async def analyze_product(request: BarcodeAnalysisRequest):
                 "data_variance": 0
             }
         
+        # === INGREDIENT INTELLIGENCE ===
+        ingredient_intel = None
+        ingredients_text = product_data.get("ingredients") or analysis.get("ingredients", "")
+        if ingredients_text:
+            try:
+                ingredient_intel = quick_decode(
+                    ingredient_text=ingredients_text,
+                    product_name=analysis.get("product_name", ""),
+                )
+            except Exception as e:
+                logger.warning(f"Ingredient decode failed (non-critical): {e}")
+
         # Build response
         response = FoodAnalysisResponse(
             barcode=request.barcode or f"no-barcode-{product_data.get('id', 'unknown')}",
@@ -673,6 +737,7 @@ async def analyze_product(request: BarcodeAnalysisRequest):
             recipes=analysis.get("recipes", []),
             nutrition_tips=analysis.get("nutrition_tips", []),
             detailed_nutrition=detailed_nutrition,
+            ingredient_intelligence=ingredient_intel,
             timestamp=analysis.get("analysis_timestamp")
         )
         
@@ -1053,6 +1118,279 @@ async def get_alternatives(request: AlternativesRequest):
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to find alternatives: {str(e)}"
+        )
+
+
+# ===== ENHANCED PRODUCT SEARCH (Database + Local) =====
+
+class ProductSearchComprehensiveRequest(BaseModel):
+    """Request for comprehensive product search"""
+    query: str = Field(..., description="Product name, brand, or keywords")
+    limit: int = Field(default=20, le=100, description="Maximum results")
+    strict_dedup: bool = Field(default=False, description="If True, only return 1 product per brand (no variants)")
+
+
+class ProductSearchComprehensiveResponse(BaseModel):
+    """Response for comprehensive search"""
+    query: str
+    total_results: int
+    results: List[Dict[str, Any]]
+    sources: List[str]
+
+
+@app.post("/search-products", response_model=ProductSearchComprehensiveResponse, tags=["Product Search"])
+async def search_products_comprehensive(request: ProductSearchComprehensiveRequest):
+    """
+    🔍 COMPREHENSIVE PRODUCT SEARCH
+    
+    Searches across:
+    1. Local database (products you added from Amazon, etc.)
+    2. Supabase food_products table
+    3. Open Food Facts (if local searches found nothing)
+    
+    Returns all matching products sorted by relevance.
+    Results are DEDUPLICATED to avoid showing 20 "Coca Cola" variants.
+    
+    Example: POST /search-products with body:
+    {
+        "query": "pasta",
+        "limit": 20
+    }
+    """
+    try:
+        logger.info(f"🔍 Comprehensive search for: '{request.query}' (strict_dedup={request.strict_dedup})")
+        
+        from knowledge.local_product_db import local_db
+        from knowledge.product_deduplicator import deduplicate_search_results
+        
+        results = []
+        sources = set()
+        
+        # Fetch with buffer to account for deduplication
+        fetch_limit = request.limit * 3 if request.strict_dedup else request.limit * 2
+        
+        # 1. Search local product database (highest priority)
+        logger.info("  📁 Searching local database...")
+        try:
+            local_results = local_db.search(request.query, limit=fetch_limit)
+            if local_results:
+                results.extend(local_results)
+                sources.add("Local Database")
+                logger.info(f"  ✅ Found {len(local_results)} in local database")
+        except Exception as e:
+            logger.warning(f"  ⚠️ Local search error: {e}")
+        
+        # 2. Search Supabase/main database
+        logger.info("  🗄️ Searching Supabase...")
+        try:
+            db_results = data_agent.search_food_by_name(request.query, limit=fetch_limit)
+            if db_results:
+                # Avoid duplicates by checking names
+                existing_names = {r.get('name', '').lower() for r in results}
+                new_results = [
+                    r for r in db_results 
+                    if r.get('name', '').lower() not in existing_names
+                ]
+                results.extend(new_results)
+                sources.add("Supabase")
+                logger.info(f"  ✅ Found {len(new_results)} in Supabase")
+        except Exception as e:
+            logger.warning(f"  ⚠️ Supabase search error: {e}")
+        
+        # 3. DEDUPLICATE results before limiting
+        logger.info("  🔄 Deduplicating results...")
+        max_variants = 1 if request.strict_dedup else 2
+        results = deduplicate_search_results(results, strict_mode=False, max_variants=max_variants)
+        
+        # Limit final results
+        results = results[:request.limit]
+        
+        logger.info(f"✅ Search complete: {len(results)} results from {len(sources)} sources")
+        
+        return ProductSearchComprehensiveResponse(
+            query=request.query,
+            total_results=len(results),
+            results=results,
+            sources=list(sources)
+        )
+        
+    except Exception as e:
+        logger.error(f"Search error: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Search failed: {str(e)}"
+        )
+
+
+# ==================== MEAL PLANNER REQUEST/RESPONSE MODELS ====================
+
+class MealPlanRequest(BaseModel):
+    """Request for meal planning"""
+    available_ingredients: List[str] = Field(..., description="Ingredients available at home")
+    nutritional_goals: Dict[str, Any] = Field(
+        default={"protein_g": 30, "calories": 2000},
+        description="Nutritional targets per day"
+    )
+    dietary_restrictions: Optional[List[str]] = Field(
+        None,
+        description="Dietary restrictions (vegan, gluten_free, dairy_free, etc.)"
+    )
+    cuisine_preferences: Optional[List[str]] = Field(
+        None,
+        description="Preferred cuisines (indian, italian, asian, etc.)"
+    )
+    meal_type: str = Field(
+        default="balanced",
+        description="Type: balanced, high_protein, weight_loss, muscle_gain"
+    )
+    num_meals: int = Field(default=5, ge=1, le=10, description="Number of meal suggestions")
+    cooking_time_limit: int = Field(default=30, ge=5, le=120, description="Max cooking time in minutes")
+
+
+class WeeklyMealPlanRequest(BaseModel):
+    """Request for weekly meal plan"""
+    available_ingredients: List[str] = Field(..., description="Ingredients at home")
+    nutritional_goals: Dict[str, Any] = Field(
+        default={"protein_g": 150, "calories": 14000},
+        description="Weekly nutritional targets"
+    )
+    dietary_restrictions: Optional[List[str]] = Field(None)
+    cuisine_preferences: Optional[List[str]] = Field(None)
+
+
+class RecipeSuggestionRequest(BaseModel):
+    """Request for recipe suggestions"""
+    ingredients: List[str] = Field(..., description="Available ingredients")
+    cuisine: Optional[str] = Field(None, description="Preferred cuisine")
+    skill_level: str = Field(
+        default="intermediate",
+        description="beginner, intermediate, or advanced"
+    )
+    dietary_needs: Optional[List[str]] = Field(None, description="Special dietary requirements")
+
+
+class NutritionAnalysisRequest(BaseModel):
+    """Request for nutrition analysis"""
+    meal_description: str = Field(..., description="Description of the meal")
+    serving_size: str = Field(default="1 serving", description="Serving size")
+
+
+class MealPlanResponse(BaseModel):
+    """Response for meal planning"""
+    success: bool
+    meal_type: Optional[str] = None
+    available_ingredients: Optional[List[str]] = None
+    nutritional_goals: Optional[Dict[str, Any]] = None
+    meals: Optional[List[Dict[str, Any]]] = None
+    daily_nutrition: Optional[Dict[str, Any]] = None
+    shopping_list: Optional[List[str]] = None
+    error: Optional[str] = None
+    generated_at: Optional[str] = None
+
+
+class AddProductRequest(BaseModel):
+    """Request to add a product"""
+    name: str = Field(..., description="Product name")
+    brand: Optional[str] = Field(None, description="Brand name")
+    barcode: Optional[str] = Field(None, description="Barcode")
+    serving_size: Optional[float] = Field(None, description="Serving size")
+    serving_unit: Optional[str] = Field(None, description="Serving unit (g, ml, etc)")
+    calories: Optional[float] = Field(None, description="Calories per serving")
+    protein_g: Optional[float] = Field(None, description="Protein in grams")
+    carbs_g: Optional[float] = Field(None, description="Carbohydrates in grams")
+    fat_g: Optional[float] = Field(None, description="Fat in grams")
+    sugar_g: Optional[float] = Field(None, description="Sugar in grams")
+    fiber_g: Optional[float] = Field(None, description="Fiber in grams")
+    ingredients: Optional[str] = Field(None, description="Ingredient list")
+    source: Optional[str] = Field(default="manual", description="Data source (amazon, bigbasket, manual, etc)")
+
+
+@app.post("/add-product", tags=["Product Management"])
+async def add_product(request: AddProductRequest):
+    """
+    ➕ ADD A NEW PRODUCT
+    
+    Saves a product to the local database (and optionally Supabase).
+    Great for adding products from Amazon, BigBasket, or manually entering nutrition data.
+    
+    Example: POST /add-product with body:
+    {
+        "name": "Barilla Penne Pasta",
+        "brand": "Barilla",
+        "barcode": "8076808000062",
+        "source": "amazon",
+        "calories": 131,
+        "protein_g": 5,
+        "carbs_g": 25,
+        "fat_g": 1.1,
+        "sugar_g": 1.2
+    }
+    """
+    try:
+        from knowledge.local_product_db import local_db
+        
+        logger.info(f"➕ Adding product: {request.name} ({request.brand or 'No brand'})")
+        
+        # Add to local database
+        product_dict = request.dict(exclude_none=True)
+        product_id = local_db.add_product(product_dict)
+        
+        logger.info(f"✅ Product saved with ID: {product_id}")
+        
+        return {
+            "success": True,
+            "product_id": product_id,
+            "message": f"Product '{request.name}' added successfully",
+            "product": product_dict
+        }
+        
+    except Exception as e:
+        logger.error(f"Error adding product: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to add product: {str(e)}"
+        )
+
+
+@app.get("/local-products/count", tags=["Product Management"])
+async def get_local_products_count():
+    """Get count of products in local database"""
+    try:
+        from knowledge.local_product_db import local_db
+        count = local_db.count()
+        return {
+            "total_local_products": count,
+            "message": f"Local database has {count} products"
+        }
+    except Exception as e:
+        logger.error(f"Error getting count: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e)
+        )
+
+
+@app.get("/local-products", tags=["Product Management"])
+async def get_local_products(skip: int = 0, limit: int = 50):
+    """Get all products from local database with pagination"""
+    try:
+        from knowledge.local_product_db import local_db
+        
+        all_products = local_db.get_all()
+        paginated = all_products[skip:skip + limit]
+        
+        return {
+            "skip": skip,
+            "limit": limit,
+            "total": len(all_products),
+            "returned": len(paginated),
+            "products": paginated
+        }
+    except Exception as e:
+        logger.error(f"Error fetching products: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e)
         )
 
 
@@ -2217,13 +2555,113 @@ async def list_products(limit: int = 200, offset: int = 0, region: Optional[str]
                     "image_url": "https://m.media-amazon.com/images/I/75xxxxx.jpg",
                     "is_verified": True,
                     "source": "web_scraping"
+                },
+                {
+                    "id": "pasta-6",
+                    "product_name": "Bambino Vegetarian Pasta Macaroni 850g | Made from Durum Wheat",
+                    "brand": "Bambino",
+                    "region": "India",
+                    "weight": "850g",
+                    "image_url": "https://m.media-amazon.com/images/I/76xxxxx.jpg",
+                    "is_verified": True,
+                    "source": "web_scraping"
+                },
+                {
+                    "id": "pasta-7",
+                    "product_name": "MTR Penne Pasta 500g | Premium Quality Durum Wheat",
+                    "brand": "MTR",
+                    "region": "India",
+                    "weight": "500g",
+                    "image_url": "https://m.media-amazon.com/images/I/77xxxxx.jpg",
+                    "is_verified": True,
+                    "source": "web_scraping"
+                },
+                {
+                    "id": "pasta-8",
+                    "product_name": "Sunfeast Yippee Pasta Treat 75g | Fun Shaped Pasta",
+                    "brand": "Sunfeast Yippee",
+                    "region": "India",
+                    "weight": "75g",
+                    "image_url": "https://m.media-amazon.com/images/I/78xxxxx.jpg",
+                    "is_verified": True,
+                    "source": "web_scraping"
+                },
+                {
+                    "id": "pasta-9",
+                    "product_name": "Barilla Spaghetti Pasta 500g | Italian Quality",
+                    "brand": "Barilla",
+                    "region": "India",
+                    "weight": "500g",
+                    "image_url": "https://m.media-amazon.com/images/I/79xxxxx.jpg",
+                    "is_verified": True,
+                    "source": "web_scraping"
+                },
+                {
+                    "id": "pasta-10",
+                    "product_name": "San Remo Pasta Spirals 500g | Australian Durum Wheat",
+                    "brand": "San Remo",
+                    "region": "India",
+                    "weight": "500g",
+                    "image_url": "https://m.media-amazon.com/images/I/80xxxxx.jpg",
+                    "is_verified": True,
+                    "source": "web_scraping"
+                },
+                {
+                    "id": "pasta-11",
+                    "product_name": "Knorr Pasta Penne 75g | Quick Cook Pasta",
+                    "brand": "Knorr",
+                    "region": "India",
+                    "weight": "75g",
+                    "image_url": "https://m.media-amazon.com/images/I/81xxxxx.jpg",
+                    "is_verified": True,
+                    "source": "web_scraping"
+                },
+                {
+                    "id": "pasta-12",
+                    "product_name": "Wai Wai Quick Pasta Masala 85g | Instant Pasta",
+                    "brand": "Wai Wai",
+                    "region": "India",
+                    "weight": "85g",
+                    "image_url": "https://m.media-amazon.com/images/I/82xxxxx.jpg",
+                    "is_verified": True,
+                    "source": "web_scraping"
+                },
+                {
+                    "id": "pasta-13",
+                    "product_name": "Haldiram's Pasta 200g | Traditional Indian Taste",
+                    "brand": "Haldiram's",
+                    "region": "India",
+                    "weight": "200g",
+                    "image_url": "https://m.media-amazon.com/images/I/83xxxxx.jpg",
+                    "is_verified": True,
+                    "source": "web_scraping"
+                },
+                {
+                    "id": "pasta-14",
+                    "product_name": "Organic India Whole Wheat Pasta 500g | Organic & Healthy",
+                    "brand": "Organic India",
+                    "region": "India",
+                    "weight": "500g",
+                    "image_url": "https://m.media-amazon.com/images/I/84xxxxx.jpg",
+                    "is_verified": True,
+                    "source": "web_scraping"
+                },
+                {
+                    "id": "pasta-15",
+                    "product_name": "Tasty Bite Pasta Penne 400g | Ready to Cook",
+                    "brand": "Tasty Bite",
+                    "region": "India",
+                    "weight": "400g",
+                    "image_url": "https://m.media-amazon.com/images/I/85xxxxx.jpg",
+                    "is_verified": True,
+                    "source": "web_scraping"
                 }
             ]
             return {
                 "products": scraped_products,
                 "total": len(scraped_products),
                 "regions": ["India"],
-                "brands": ["DISANO", "Del Monte", "Chef's Basket"]
+                "brands": ["DISANO", "Del Monte", "Chef's Basket", "Bambino", "MTR", "Sunfeast Yippee", "Barilla", "San Remo", "Knorr", "Wai Wai", "Haldiram's", "Organic India", "Tasty Bite"]
             }
 
         # Try to get products from database
@@ -2427,6 +2865,701 @@ async def list_products(limit: int = 200, offset: int = 0, region: Optional[str]
             "total": len(scraped_products),
             "regions": ["India"],
             "brands": ["DISANO", "Del Monte", "Chef's Basket"]
+        }
+
+
+# ==================== Ingredient Intelligence API ====================
+# "We don't judge food. We decode labels and show you what regulators,
+#  researchers, and public databases already say."
+
+class DecodeIngredientsRequest(BaseModel):
+    """Request to decode a product's ingredient list."""
+    ingredients: str = Field(..., description="Ingredient list text (can be raw/OCR)")
+    product_name: Optional[str] = Field(None, description="Product name for context")
+    raw_ocr_text: Optional[str] = Field(None, description="Full OCR text if ingredients need auto-detection")
+
+
+class CompareProductsRequest(BaseModel):
+    """Request to compare two products' ingredient profiles."""
+    product_a_ingredients: str = Field(..., description="Product A ingredient list")
+    product_b_ingredients: str = Field(..., description="Product B ingredient list")
+    product_a_name: str = Field(default="Product A", description="Product A name")
+    product_b_name: str = Field(default="Product B", description="Product B name")
+
+
+class IngredientLookupRequest(BaseModel):
+    """Request to look up a single ingredient."""
+    name: str = Field(..., description="Ingredient name or E-number")
+
+
+class IngredientSearchRequest(BaseModel):
+    """Request to search ingredients."""
+    query: str = Field(..., description="Search query")
+
+
+@app.post("/decode-ingredients", tags=["Ingredient Intelligence"])
+async def decode_ingredients_endpoint(request: DecodeIngredientsRequest):
+    """
+    Decode a product's ingredient label into source-cited information.
+
+    Parses the ingredient list, identifies each ingredient against our regulatory
+    database (FSSAI, FDA, EFSA, CODEX), and returns plain-language explanations
+    with full source citations.
+
+    Every claim is traceable to a regulation, published study, or official document.
+    """
+    try:
+        result = quick_decode(
+            ingredient_text=request.ingredients,
+            product_name=request.product_name or "",
+        )
+        return result
+    except Exception as e:
+        logger.error(f"Error decoding ingredients: {e}")
+        raise HTTPException(status_code=500, detail=f"Error decoding ingredients: {str(e)}")
+
+
+@app.post("/compare-products", tags=["Ingredient Intelligence"])
+async def compare_products_endpoint(request: CompareProductsRequest):
+    """
+    Compare two products' ingredient profiles side by side.
+
+    Shows common concerns, unique concerns per product, and which product
+    has a simpler ingredient list.
+    """
+    try:
+        result = compare_products(
+            product_a_ingredients=request.product_a_ingredients,
+            product_b_ingredients=request.product_b_ingredients,
+            product_a_name=request.product_a_name,
+            product_b_name=request.product_b_name,
+        )
+        return result
+    except Exception as e:
+        logger.error(f"Error comparing products: {e}")
+        raise HTTPException(status_code=500, detail=f"Error comparing products: {str(e)}")
+
+
+@app.post("/lookup-ingredient", tags=["Ingredient Intelligence"])
+async def lookup_ingredient_endpoint(request: IngredientLookupRequest):
+    """
+    Look up detailed information about a single ingredient.
+
+    Returns regulatory status across FSSAI/FDA/EFSA, health effects,
+    concern level, ADI, and all source citations.
+    """
+    info = lookup_ingredient(request.name)
+    if not info:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Ingredient '{request.name}' not found in our database. Try searching with /search-ingredients."
+        )
+    return info.to_dict()
+
+
+@app.post("/search-ingredients", tags=["Ingredient Intelligence"])
+async def search_ingredients_endpoint(request: IngredientSearchRequest):
+    """
+    Search for ingredients by partial name match.
+    """
+    results = search_ingredients(request.query)
+    return {
+        "query": request.query,
+        "results": [r.to_dict() for r in results],
+        "total": len(results),
+    }
+
+
+@app.get("/ingredient-database/stats", tags=["Ingredient Intelligence"])
+async def ingredient_database_stats():
+    """
+    Get statistics about the ingredient knowledge base.
+    """
+    stats = get_database_stats()
+    stats["description"] = (
+        "EatSmartly Ingredient Intelligence Database. "
+        "Every entry is source-cited from FSSAI, FDA, EFSA, CODEX, and PubMed."
+    )
+    stats["trust_model"] = (
+        "We don't make health claims. We aggregate what regulators and "
+        "researchers already say — with full citations."
+    )
+    return stats
+
+
+@app.get("/ingredients/by-concern/{level}", tags=["Ingredient Intelligence"])
+async def ingredients_by_concern_endpoint(level: str):
+    """
+    Get all ingredients at a specific concern level.
+    Levels: none, low, moderate, high, controversial
+    """
+    try:
+        concern = ConcernLevel(level)
+    except ValueError:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid concern level: {level}. Valid: none, low, moderate, high, controversial"
+        )
+    results = get_ingredients_by_concern(concern)
+    return {
+        "concern_level": level,
+        "ingredients": [r.to_dict() for r in results],
+        "total": len(results),
+    }
+
+
+@app.get("/ingredients/by-category/{category}", tags=["Ingredient Intelligence"])
+async def ingredients_by_category_endpoint(category: str):
+    """
+    Get all ingredients of a specific category.
+    Categories: preservative, colorant, sweetener, emulsifier, thickener, etc.
+    """
+    try:
+        cat = IngredientCategory(category)
+    except ValueError:
+        valid = [c.value for c in IngredientCategory]
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid category: {category}. Valid: {', '.join(valid)}"
+        )
+    results = get_ingredients_by_category(cat)
+    return {
+        "category": category,
+        "ingredients": [r.to_dict() for r in results],
+        "total": len(results),
+    }
+
+
+# ===== RAG Document Indexing =====
+
+@app.post("/admin/index-documents", tags=["Ingredient Intelligence"])
+async def index_documents_endpoint(background_tasks: BackgroundTasks):
+    """
+    Trigger indexing of regulatory PDFs (FSSAI, IFCT) into the RAG vector store.
+    Runs in background — PDFs are read, chunked, embedded, and saved.
+    After indexing, unknown ingredients get auto-retrieved context from these docs.
+    """
+    import glob
+    from pathlib import Path as _Path
+
+    base = _Path(__file__).resolve().parent.parent
+    backend = _Path(__file__).resolve().parent
+
+    pdf_paths = []
+    for search_dir in [base, backend, backend / "asset"]:
+        for pdf in search_dir.glob("*.pdf"):
+            if pdf.name not in [p.split("\\")[-1].split("/")[-1] for p in pdf_paths]:
+                pdf_paths.append(str(pdf))
+
+    if not pdf_paths:
+        return {"status": "error", "message": "No PDF files found in project root or backend/asset/"}
+
+    def _run_indexing():
+        try:
+            from knowledge.rag_pipeline import RAGPipeline
+            import knowledge  # noqa: F401
+            pipeline = RAGPipeline()
+            pipeline.index_documents(pdf_paths=pdf_paths, include_kb=True)
+            logger.info(f"Background indexing complete — {pipeline.store.size} chunks")
+        except Exception as e:
+            logger.error(f"Background indexing failed: {e}")
+
+    background_tasks.add_task(_run_indexing)
+
+    return {
+        "status": "indexing_started",
+        "pdfs_found": [_Path(p).name for p in pdf_paths],
+        "message": "Indexing started in background. This may take a few minutes for large PDFs.",
+    }
+
+
+@app.get("/admin/rag-status", tags=["Ingredient Intelligence"])
+async def rag_status_endpoint():
+    """Check if the RAG vector store is indexed and ready."""
+    from pathlib import Path as _Path
+    store_path = _Path(__file__).resolve().parent / "data" / "vector_store.json"
+
+    if not store_path.exists():
+        return {
+            "status": "not_indexed",
+            "message": "Vector store not found. Run POST /admin/index-documents first.",
+            "chunks": 0,
+        }
+
+    try:
+        import json
+        with open(store_path) as f:
+            data = json.load(f)
+        chunk_count = len(data.get("chunks", []))
+        return {
+            "status": "ready",
+            "chunks": chunk_count,
+            "store_path": str(store_path),
+            "message": f"RAG pipeline ready with {chunk_count} searchable document chunks.",
+        }
+    except Exception as e:
+        return {"status": "error", "message": str(e), "chunks": 0}
+
+
+@app.get("/rag-search", tags=["Ingredient Intelligence"])
+async def rag_search_endpoint(query: str, top_k: int = 5):
+    """
+    Search the RAG vector store for regulatory information.
+    Useful for ingredients not in the manual database.
+    """
+    try:
+        from knowledge.rag_pipeline import RAGPipeline
+        pipeline = RAGPipeline()
+        if not pipeline.is_ready:
+            return {"found": False, "message": "RAG pipeline not indexed yet. Run POST /admin/index-documents first."}
+        results = pipeline.retrieve(query, top_k=top_k)
+        return {
+            "query": query,
+            "found": len(results) > 0,
+            "results": [r.to_dict() for r in results],
+            "total": len(results),
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"RAG search error: {str(e)}")
+
+
+# ===== AI-Powered Explanations (Ollama + Llama 3.1) =====
+
+class AIExplainRequest(BaseModel):
+    """Request for AI-powered ingredient explanation."""
+    ingredient: str = Field(..., description="Ingredient name to explain")
+    include_rag: bool = Field(default=True, description="Include RAG document context")
+
+
+class AIProductSummaryRequest(BaseModel):
+    """Request for AI-powered product summary."""
+    ingredients: str = Field(..., description="Ingredient list text")
+    product_name: str = Field(default="", description="Product name")
+
+
+@app.post("/ai/explain-ingredient", tags=["AI Intelligence"])
+async def ai_explain_ingredient_endpoint(request: AIExplainRequest):
+    """
+    Get an AI-generated, source-cited explanation of an ingredient.
+
+    Uses Ollama (local Llama 3.1) to synthesize information from our
+    regulatory database + FSSAI/IFCT PDFs into a plain-language explanation.
+    Falls back to template if Ollama is not running.
+    """
+    from knowledge.llm_explainer import explain_ingredient
+    from knowledge.regulatory_db import lookup_ingredient as kb_lookup
+
+    # Get KB data
+    kb_data = None
+    info = kb_lookup(request.ingredient)
+    if info:
+        kb_data = info.to_dict()
+
+    # Get RAG context
+    rag_context = None
+    if request.include_rag:
+        try:
+            from knowledge.rag_pipeline import RAGPipeline
+            pipeline = RAGPipeline()
+            if pipeline.is_ready:
+                results = pipeline.retrieve(request.ingredient, top_k=3)
+                rag_context = [r.to_dict() for r in results]
+        except Exception as e:
+            logger.warning(f"RAG retrieval failed: {e}")
+
+    result = await explain_ingredient(request.ingredient, kb_data, rag_context)
+    result["ingredient"] = request.ingredient
+    result["in_database"] = info is not None
+    return result
+
+
+@app.post("/ai/summarize-product", tags=["AI Intelligence"])
+async def ai_summarize_product_endpoint(request: AIProductSummaryRequest):
+    """
+    Get an AI-generated summary of a product's ingredient profile.
+
+    Decodes all ingredients first, then uses Ollama to generate a
+    natural-language summary highlighting concerns and notable ingredients.
+    """
+    from knowledge.llm_explainer import explain_product
+
+    # First decode the ingredients
+    decoded = quick_decode(request.ingredients, request.product_name)
+
+    # Then get AI summary
+    result = await explain_product(
+        product_name=request.product_name or "This product",
+        decoded_ingredients=decoded.get("decoded_ingredients", []),
+    )
+    result["decode"] = decoded
+    return result
+
+
+@app.get("/ai/status", tags=["AI Intelligence"])
+async def ai_status_endpoint():
+    """Check if the AI (Ollama) is available and which model is loaded."""
+    from knowledge.llm_explainer import get_ollama_client
+    client = get_ollama_client()
+    available = await client.is_available()
+
+    if available:
+        return {
+            "status": "ready",
+            "provider": "ollama",
+            "model": client.model,
+            "url": client.base_url,
+            "message": f"AI ready — using {client.model} via Ollama",
+        }
+    else:
+        return {
+            "status": "unavailable",
+            "provider": "ollama",
+            "model": client.model,
+            "url": client.base_url,
+            "message": (
+                "Ollama not running. Install from https://ollama.com, then run: "
+                f"ollama pull {client.model}"
+            ),
+            "fallback": "Template-based explanations are used when AI is unavailable.",
+        }
+
+
+# ==================== AI MEAL PLANNER ENDPOINTS ====================
+
+@app.post("/meal-plan", response_model=MealPlanResponse, tags=["Meal Planning"])
+async def generate_meal_plan(request: MealPlanRequest):
+    """
+    🍽️ GENERATE PERSONALIZED MEAL PLAN
+    
+    Creates a personalized meal plan based on:
+    - Available ingredients at home
+    - Nutritional goals (high protein, specific nutrients)
+    - Dietary restrictions and preferences
+    - Researched-backed recipes
+    
+    Example: POST /meal-plan with body:
+    {
+        "available_ingredients": ["chicken", "rice", "broccoli", "olive oil", "egg", "spinach"],
+        "nutritional_goals": {"protein_g": 40, "calories": 2500},
+        "meal_type": "high_protein",
+        "num_meals": 5,
+        "cooking_time_limit": 30,
+        "dietary_restrictions": ["gluten_free"]
+    }
+    """
+    try:
+        logger.info(f"🍽️  Meal plan request: {request.meal_type} with {request.num_meals} meals")
+        
+        meal_planner = get_meal_planner()
+        
+        result = meal_planner.generate_meal_plan(
+            available_ingredients=request.available_ingredients,
+            nutritional_goals=request.nutritional_goals,
+            dietary_restrictions=request.dietary_restrictions,
+            cuisine_preferences=request.cuisine_preferences,
+            meal_type=request.meal_type,
+            num_meals=request.num_meals,
+            cooking_time_limit=request.cooking_time_limit
+        )
+        
+        return MealPlanResponse(**result)
+        
+    except Exception as e:
+        logger.error(f"❌ Meal plan error: {e}")
+        return MealPlanResponse(
+            success=False,
+            error=str(e)
+        )
+
+
+@app.post("/weekly-meal-plan", tags=["Meal Planning"])
+async def generate_weekly_meal_plan(request: WeeklyMealPlanRequest):
+    """
+    📅 GENERATE 7-DAY MEAL PLAN
+    
+    Creates a complete weekly meal plan with:
+    - All meals optimized for nutritional goals
+    - Shopping list organized by category
+    - Variety across cuisines and flavors
+    - High protein focus
+    - Researched-backed healthy recipes
+    
+    Example: POST /weekly-meal-plan with body:
+    {
+        "available_ingredients": ["chicken", "fish", "eggs", "rice", "vegetables"],
+        "nutritional_goals": {"protein_g": 150, "calories": 14000},
+        "dietary_restrictions": ["nut_allergy"]
+    }
+    """
+    try:
+        logger.info("📅 Generating 7-day meal plan...")
+        
+        meal_planner = get_meal_planner()
+        
+        result = meal_planner.generate_weekly_meal_plan(
+            available_ingredients=request.available_ingredients,
+            nutritional_goals=request.nutritional_goals,
+            dietary_restrictions=request.dietary_restrictions,
+            cuisine_preferences=request.cuisine_preferences
+        )
+        
+        return result
+        
+    except Exception as e:
+        logger.error(f"❌ Weekly meal plan error: {e}")
+        return {
+            "success": False,
+            "error": str(e)
+        }
+
+
+@app.post("/recipes", tags=["Meal Planning"])
+async def get_recipe_suggestions(request: RecipeSuggestionRequest):
+    """
+    👨‍🍳 GET RECIPE SUGGESTIONS
+    
+    Find creative recipes using available ingredients with:
+    - Researched-backed healthy options
+    - Authenticated from credible recipe sources
+    - Multiple cuisine options
+    - Difficulty levels (beginner to advanced)
+    - Complete nutritional information
+    
+    Example: POST /recipes with body:
+    {
+        "ingredients": ["pasta", "tomato", "garlic", "olive oil", "basil"],
+        "cuisine": "italian",
+        "skill_level": "intermediate",
+        "dietary_needs": ["gluten_free", "high_protein"]
+    }
+    """
+    try:
+        logger.info(f"👨‍🍳 Getting recipes for {len(request.ingredients)} ingredients")
+        
+        meal_planner = get_meal_planner()
+        
+        result = meal_planner.get_recipe_suggestions(
+            ingredients=request.ingredients,
+            cuisine=request.cuisine,
+            skill_level=request.skill_level,
+            dietary_needs=request.dietary_needs
+        )
+        
+        return result
+        
+    except Exception as e:
+        logger.error(f"❌ Recipe suggestion error: {e}")
+        return {
+            "success": False,
+            "error": str(e)
+        }
+
+
+@app.post("/analyze-nutrition", tags=["Meal Planning"])
+async def analyze_meal_nutrition(request: NutritionAnalysisRequest):
+    """
+    🔬 ANALYZE MEAL NUTRITION
+    
+    Get detailed nutritional breakdown of a meal using:
+    - Verified nutritional databases
+    - Research-backed analysis
+    - Macronutrient and micronutrient data
+    - Health benefits information
+    
+    Example: POST /analyze-nutrition with body:
+    {
+        "meal_description": "Grilled chicken breast (200g) with brown rice (150g) and steamed broccoli (100g)",
+        "serving_size": "1 serving"
+    }
+    """
+    try:
+        logger.info(f"🔬 Analyzing nutrition: {request.meal_description[:50]}...")
+        
+        meal_planner = get_meal_planner()
+        
+        result = meal_planner.get_nutrition_analysis(
+            meal_description=request.meal_description,
+            serving_size=request.serving_size
+        )
+        
+        return result
+        
+    except Exception as e:
+        logger.error(f"❌ Nutrition analysis error: {e}")
+        return {
+            "success": False,
+            "error": str(e)
+        }
+
+
+# ==================== BACKGROUND PRODUCT SCRAPER ENDPOINTS ====================
+
+@app.post("/scraper/run-now", tags=["Background Scraper"])
+async def run_scraper_now():
+    """
+    🛒 RUN SCRAPER IMMEDIATELY
+    
+    Manually trigger the product scraper to run now (instead of waiting for schedule).
+    Scrapes Amazon and BigBasket across all product categories and adds to database.
+    
+    Returns results of the scrape operation.
+    """
+    try:
+        logger.info("🛒 Manual scraper trigger requested")
+        
+        from agents.background_scraper import get_scraper
+        
+        scraper = get_scraper()
+        result = await scraper.run_full_scrape_cycle()
+        
+        logger.info(f"✅ Manual scrape complete: {result}")
+        
+        return result
+        
+    except Exception as e:
+        logger.error(f"❌ Scraper error: {e}")
+        return {
+            "success": False,
+            "error": str(e)
+        }
+
+
+@app.get("/scraper/status", tags=["Background Scraper"])
+async def get_scraper_status():
+    """
+    📊 GET SCRAPER STATUS
+    
+    Get information about:
+    - Whether scraper is running
+    - Scheduled jobs
+    - Last scrape result
+    - Next scheduled run time
+    """
+    try:
+        from knowledge.background_scheduler import get_scheduler
+        
+        scheduler = get_scheduler()
+        status = scheduler.get_status()
+        
+        return {
+            "success": True,
+            "scheduler_status": status,
+            "timestamp": datetime.now().isoformat()
+        }
+        
+    except Exception as e:
+        logger.error(f"❌ Error getting status: {e}")
+        return {
+            "success": False,
+            "error": str(e)
+        }
+
+
+@app.get("/scraper/last-result", tags=["Background Scraper"])
+async def get_last_scrape_result():
+    """
+    📋 GET LAST SCRAPE RESULT
+    
+    Get the result of the last product scraping operation:
+    - Products added
+    - Products skipped (duplicates)
+    - Breakdown by category
+    - When it ran
+    """
+    try:
+        from knowledge.background_scheduler import get_scheduler
+        
+        scheduler = get_scheduler()
+        result = scheduler.get_last_scrape_result()
+        
+        if result:
+            return {
+                "success": True,
+                "last_result": result,
+                "timestamp": datetime.now().isoformat()
+            }
+        else:
+            return {
+                "success": True,
+                "last_result": None,
+                "message": "No scraper runs yet"
+            }
+        
+    except Exception as e:
+        logger.error(f"❌ Error getting result: {e}")
+        return {
+            "success": False,
+            "error": str(e)
+        }
+
+
+@app.post("/scraper/schedule", tags=["Background Scraper"])
+async def schedule_scraper(interval_hours: int = 24):
+    """
+    ⏰ SCHEDULE SCRAPER
+    
+    Configure how often the scraper runs in the background.
+    
+    Args:
+        interval_hours: Run scraper every N hours (default: 24 = daily)
+    """
+    try:
+        from knowledge.background_scheduler import get_scheduler
+        
+        if interval_hours < 1 or interval_hours > 720:  # Max 30 days
+            raise ValueError("interval_hours must be between 1 and 720")
+        
+        logger.info(f"⏰ Scheduling scraper to run every {interval_hours} hours")
+        
+        scheduler = get_scheduler()
+        
+        # Cancel existing scraper job
+        try:
+            scheduler.remove_job("background_product_scraper")
+        except:
+            pass
+        
+        # Schedule new one
+        result = await scheduler.schedule_product_scraping(
+            interval_hours=interval_hours,
+            job_id="background_product_scraper"
+        )
+        
+        return result
+        
+    except Exception as e:
+        logger.error(f"❌ Error scheduling scraper: {e}")
+        return {
+            "success": False,
+            "error": str(e)
+        }
+
+
+@app.get("/scraper/jobs", tags=["Background Scraper"])
+async def get_scheduled_jobs():
+    """
+    📅 GET SCHEDULED JOBS
+    
+    List all background jobs currently scheduled.
+    """
+    try:
+        from knowledge.background_scheduler import get_scheduler
+        
+        scheduler = get_scheduler()
+        jobs = scheduler.get_jobs()
+        
+        return {
+            "success": True,
+            "jobs": jobs,
+            "total_jobs": len(jobs),
+            "timestamp": datetime.now().isoformat()
+        }
+        
+    except Exception as e:
+        logger.error(f"❌ Error getting jobs: {e}")
+        return {
+            "success": False,
+            "error": str(e)
         }
 
 

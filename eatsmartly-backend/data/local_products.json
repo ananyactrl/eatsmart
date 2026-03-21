@@ -1,0 +1,45 @@
+{
+  "products": [
+    {
+      "name": "Barilla Penne Pasta",
+      "brand": "Barilla",
+      "calories": 131,
+      "source": "amazon",
+      "id": "local_1774103425.731066",
+      "added_at": "2026-03-21T20:00:25.731066"
+    },
+    {
+      "name": "Maggi Noodles Masala",
+      "brand": "Maggi",
+      "calories": 380,
+      "source": "amazon",
+      "id": "local_1774103425.732061",
+      "added_at": "2026-03-21T20:00:25.732061"
+    },
+    {
+      "name": "Bournvita Chocolate",
+      "brand": "Bournvita",
+      "calories": 400,
+      "source": "amazon",
+      "id": "local_1774103425.733059",
+      "added_at": "2026-03-21T20:00:25.733059"
+    },
+    {
+      "name": "Fortune Pasta Fusilli",
+      "brand": "Fortune",
+      "calories": 128,
+      "source": "amazon",
+      "id": "local_1774103425.733571",
+      "added_at": "2026-03-21T20:00:25.733571"
+    },
+    {
+      "name": "Debonairs Pizza Masala",
+      "brand": "Debonairs",
+      "calories": 120,
+      "source": "amazon",
+      "id": "local_1774103425.735079",
+      "added_at": "2026-03-21T20:00:25.735079"
+    }
+  ],
+  "updated_at": "2026-03-21T20:00:25.735079"
+}
