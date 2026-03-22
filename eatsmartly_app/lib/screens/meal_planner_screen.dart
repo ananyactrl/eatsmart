@@ -14,6 +14,7 @@ class _MealPlannerScreenState extends State<MealPlannerScreen> {
   late TextEditingController _ingredientsController;
 
   bool _isLoading = false;
+  bool _isFormLoading = false; // Separate loading state for form
   Map<String, dynamic>? _mealPlanResult;
   String? _error;
 
@@ -21,7 +22,8 @@ class _MealPlannerScreenState extends State<MealPlannerScreen> {
   bool _isChatMode = false;
 
   // Chat fields
-  final List<Map<String, String>> _chatMessages = [];
+  final List<Map<String, dynamic>> _chatMessages = [];
+  final List<Map<String, dynamic>> _chatHistory = []; // For AI context
   final TextEditingController _chatInputController = TextEditingController();
   final ScrollController _chatScrollController = ScrollController();
 
@@ -80,7 +82,7 @@ class _MealPlannerScreenState extends State<MealPlannerScreen> {
     }
 
     setState(() {
-      _isLoading = true;
+      _isFormLoading = true;
       _error = null;
       _mealPlanResult = null;
     });
@@ -100,19 +102,72 @@ class _MealPlannerScreenState extends State<MealPlannerScreen> {
 
       setState(() {
         _mealPlanResult = result;
-        _isLoading = false;
+        _isFormLoading = false;
       });
     } catch (e) {
+      // Automatically try to discover server and retry
+      final discovered = await EatSmartlyAPI.autoRediscover();
+
+      if (discovered) {
+        // Show retry message
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Server found! Retrying...'),
+              duration: Duration(seconds: 2),
+            ),
+          );
+        }
+
+        // Retry the meal plan generation
+        try {
+          final result = await api.generateMealPlan(
+            availableIngredients: _availableIngredients,
+            nutritionalGoals: _getNutritionalGoals(),
+            dietaryRestrictions:
+                _dietaryRestrictions.isEmpty ? null : _dietaryRestrictions,
+            cuisinePreferences:
+                _cuisinePreferences.isEmpty ? null : _cuisinePreferences,
+            mealType: _selectedMealType,
+            numMeals: _numMeals,
+            cookingTimeLimit: _cookingTimeLimit,
+          );
+
+          setState(() {
+            _mealPlanResult = result;
+            _isFormLoading = false;
+          });
+          return; // Success!
+        } catch (retryError) {
+          // Retry failed, continue to show error
+        }
+      }
+
+      // Discovery failed or retry failed
+      final currentUrl = EatSmartlyAPI.getCurrentBaseUrl();
       setState(() {
-        _error = e.toString().replaceAll('Exception: ', '');
-        _isLoading = false;
+        _error = 'Cannot connect to server\n\n'
+            'Current server: $currentUrl\n\n'
+            'Please ensure:\n'
+            '- Backend server is running\n'
+            '- Phone and PC on same WiFi\n'
+            '- Run: start_server.bat';
+        _isFormLoading = false;
       });
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Error: $_error'),
+            content: const Text('Connection Error: Check backend is running'),
             backgroundColor: const Color(0xFFE53935),
+            duration: const Duration(seconds: 5),
+            action: SnackBarAction(
+              label: 'Retry',
+              textColor: Colors.white,
+              onPressed: () {
+                _generateMealPlan();
+              },
+            ),
           ),
         );
       }
@@ -138,84 +193,21 @@ class _MealPlannerScreenState extends State<MealPlannerScreen> {
 
     setState(() {
       _chatMessages.add({'sender': 'user', 'text': message});
+      _chatMessages
+          .add({'sender': 'bot', 'text': '🤔 Thinking...', 'isTyping': true});
       _chatInputController.clear();
       _isLoading = true;
     });
 
-    // Scroll to bottom
-    Future.delayed(const Duration(milliseconds: 100), () {
-      _chatScrollController.animateTo(
-        _chatScrollController.position.maxScrollExtent,
-        duration: const Duration(milliseconds: 300),
-        curve: Curves.easeOut,
-      );
+    // Add to chat history for AI context
+    _chatHistory.add({
+      'role': 'user',
+      'parts': [message]
     });
 
-    try {
-      // Parse user message to extract meal planning intent
-      final lowerMessage = message.toLowerCase();
-
-      // Extract ingredients mentioned in message
-      final extractedIngredients = _extractIngredientsFromText(message);
-
-      // Determine meal type from keywords
-      String mealType = 'balanced';
-      if (lowerMessage.contains('protein')) mealType = 'high_protein';
-      if (lowerMessage.contains('weight loss') ||
-          lowerMessage.contains('diet')) {
-        mealType = 'weight_loss';
-      }
-      if (lowerMessage.contains('muscle') || lowerMessage.contains('build')) {
-        mealType = 'muscle_gain';
-      }
-
-      // If ingredients found, generate meal plan
-      if (extractedIngredients.isNotEmpty) {
-        final result = await api.generateMealPlan(
-          availableIngredients: extractedIngredients,
-          nutritionalGoals: mealType == 'balanced'
-              ? {'protein_g': 30, 'calories': 2000}
-              : mealType == 'high_protein'
-                  ? {'protein_g': 50, 'calories': 2500}
-                  : mealType == 'weight_loss'
-                      ? {'protein_g': 40, 'calories': 1800}
-                      : {'protein_g': 60, 'calories': 3000},
-          mealType: mealType,
-          numMeals: 5,
-          cookingTimeLimit: 30,
-        );
-
-        setState(() {
-          _mealPlanResult = result;
-          _chatMessages.add({
-            'sender': 'bot',
-            'text':
-                '✅ Generated ${mealType.replaceAll('_', ' ')} meal plan with ${result['meals'].length} meals!'
-          });
-          _isLoading = false;
-        });
-      } else {
-        setState(() {
-          _chatMessages.add({
-            'sender': 'bot',
-            'text':
-                'I can help you plan your meals! 🍽️\n\nTry mentioning:\n• Ingredients you have (e.g., "I have chicken, rice, and broccoli")\n• Your goal (high protein, weight loss, muscle gain, or balanced)\n• Cooking time preference\n\nExample: "I have chicken and rice, I want a high protein meal"'
-          });
-          _isLoading = false;
-        });
-      }
-    } catch (e) {
-      setState(() {
-        _chatMessages.add({
-          'sender': 'bot',
-          'text': '❌ Error: ${e.toString().replaceAll('Exception: ', '')}'
-        });
-        _isLoading = false;
-      });
-    }
-
+    // Scroll to bottom
     Future.delayed(const Duration(milliseconds: 100), () {
-      if (mounted) {
+      if (_chatScrollController.hasClients) {
         _chatScrollController.animateTo(
           _chatScrollController.position.maxScrollExtent,
           duration: const Duration(milliseconds: 300),
@@ -223,63 +215,94 @@ class _MealPlannerScreenState extends State<MealPlannerScreen> {
         );
       }
     });
-  }
 
-  List<String> _extractIngredientsFromText(String text) {
-    // Simple ingredient extraction - can be enhanced
-    final commonIngredients = [
-      'chicken',
-      'beef',
-      'pork',
-      'fish',
-      'salmon',
-      'tuna',
-      'shrimp',
-      'egg',
-      'eggs',
-      'rice',
-      'pasta',
-      'bread',
-      'wheat',
-      'oats',
-      'quinoa',
-      'broccoli',
-      'carrot',
-      'spinach',
-      'lettuce',
-      'tomato',
-      'onion',
-      'garlic',
-      'pepper',
-      'apple',
-      'banana',
-      'orange',
-      'strawberry',
-      'blueberry',
-      'milk',
-      'cheese',
-      'yogurt',
-      'butter',
-      'oil',
-      'olive',
-      'beans',
-      'lentils',
-      'chickpeas',
-      'nuts',
-      'almond',
-      'peanut',
-    ];
+    try {
+      // Use the dedicated chat endpoint
+      final result = await api.mealChat(
+        message: message,
+        history: _chatHistory.length > 6
+            ? _chatHistory.sublist(_chatHistory.length - 6)
+            : _chatHistory,
+      );
 
-    final found = <String>[];
-    final lowerText = text.toLowerCase();
+      final responseText =
+          result['response'] ?? 'Sorry, I could not process that.';
 
-    for (final ingredient in commonIngredients) {
-      if (lowerText.contains(ingredient)) {
-        found.add(ingredient);
+      // Add to chat history for context
+      _chatHistory.add({
+        'role': 'model',
+        'parts': [responseText]
+      });
+
+      setState(() {
+        // Remove typing indicator and add actual response
+        _chatMessages.removeLast();
+        _chatMessages.add({'sender': 'bot', 'text': responseText});
+        _isLoading = false;
+      });
+    } catch (e) {
+      // Automatically try to discover server
+      final discovered = await EatSmartlyAPI.autoRediscover();
+
+      if (discovered) {
+        // Retry the request with new URL
+        try {
+          final result = await api.mealChat(
+            message: message,
+            history: _chatHistory.length > 6
+                ? _chatHistory.sublist(_chatHistory.length - 6)
+                : _chatHistory,
+          );
+
+          final responseText =
+              result['response'] ?? 'Sorry, I could not process that.';
+          _chatHistory.add({
+            'role': 'model',
+            'parts': [responseText]
+          });
+
+          setState(() {
+            _chatMessages.removeLast();
+            _chatMessages.add({'sender': 'bot', 'text': responseText});
+            _isLoading = false;
+          });
+
+          _scrollToBottom();
+          return; // Success!
+        } catch (retryError) {
+          // Retry failed, show error
+        }
       }
+
+      // Discovery failed or retry failed, show error
+      final currentUrl = EatSmartlyAPI.getCurrentBaseUrl();
+      setState(() {
+        _chatMessages.removeLast();
+        _chatMessages.add({
+          'sender': 'bot',
+          'text': 'Cannot connect to server.\n\n'
+              'Current server: $currentUrl\n\n'
+              'Please ensure:\n'
+              '- Backend server is running\n'
+              '- Phone and PC on same WiFi'
+        });
+        _isLoading = false;
+      });
     }
 
-    return found;
+    _scrollToBottom();
+  }
+
+  void _scrollToBottom() {
+    Future.delayed(const Duration(milliseconds: 100), () {
+      if (mounted && _chatScrollController.hasClients) {
+        _chatScrollController.animateTo(
+          _chatScrollController.position.maxScrollExtent,
+          duration: const Duration(milliseconds: 300),
+          curve: Curves.easeOut,
+        );
+      }
+    });
   }
 
   @override
@@ -299,9 +322,11 @@ class _MealPlannerScreenState extends State<MealPlannerScreen> {
           ),
         ),
       ),
-      body: _mealPlanResult != null && !_isChatMode
-          ? _buildMealPlanResult()
-          : (_isChatMode ? _buildChatMode() : _buildInputForm()),
+      body: _isChatMode
+          ? _buildChatMode()
+          : (_mealPlanResult != null
+              ? _buildMealPlanResult()
+              : _buildInputForm()),
     );
   }
 
@@ -416,27 +441,12 @@ class _MealPlannerScreenState extends State<MealPlannerScreen> {
                   itemBuilder: (context, index) {
                     final msg = _chatMessages[index];
                     final isUser = msg['sender'] == 'user';
-                    return _buildChatBubble(msg['text'] ?? '', isUser);
+                    final isTyping = msg['isTyping'] == true;
+                    return _buildChatBubble(
+                        msg['text'] ?? '', isUser, isTyping);
                   },
                 ),
         ),
-        if (_mealPlanResult != null && _mealPlanResult?['success'] == true)
-          Padding(
-            padding: const EdgeInsets.all(12),
-            child: SizedBox(
-              width: double.infinity,
-              child: ElevatedButton.icon(
-                onPressed: () {
-                  setState(() => _mealPlanResult = null);
-                },
-                icon: const Icon(Icons.arrow_back),
-                label: const Text('View Full Plan'),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFFAFA231),
-                ),
-              ),
-            ),
-          ),
         Container(
           padding: const EdgeInsets.all(12),
           decoration: BoxDecoration(
@@ -486,7 +496,7 @@ class _MealPlannerScreenState extends State<MealPlannerScreen> {
     );
   }
 
-  Widget _buildChatBubble(String text, bool isUser) {
+  Widget _buildChatBubble(String text, bool isUser, [bool isTyping = false]) {
     return Align(
       alignment: isUser ? Alignment.centerRight : Alignment.centerLeft,
       child: Container(
@@ -502,14 +512,43 @@ class _MealPlannerScreenState extends State<MealPlannerScreen> {
         constraints: BoxConstraints(
           maxWidth: MediaQuery.of(context).size.width * 0.75,
         ),
-        child: Text(
-          text,
-          style: TextStyle(
-            color: isUser ? const Color(0xFF4C0004) : Colors.black87,
-            fontSize: 13,
-            height: 1.4,
-          ),
-        ),
+        child: isTyping
+            ? Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Flexible(
+                    child: Text(
+                      text,
+                      style: TextStyle(
+                        color:
+                            isUser ? const Color(0xFF4C0004) : Colors.black87,
+                        fontSize: 13,
+                        height: 1.4,
+                        fontStyle: FontStyle.italic,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      valueColor: AlwaysStoppedAnimation<Color>(
+                        Colors.grey.shade400,
+                      ),
+                    ),
+                  ),
+                ],
+              )
+            : Text(
+                text,
+                style: TextStyle(
+                  color: isUser ? const Color(0xFF4C0004) : Colors.black87,
+                  fontSize: 13,
+                  height: 1.4,
+                ),
+              ),
       ),
     );
   }
@@ -566,15 +605,16 @@ class _MealPlannerScreenState extends State<MealPlannerScreen> {
           SizedBox(
             width: double.infinity,
             child: ElevatedButton.icon(
-              onPressed: _isLoading ? null : _generateMealPlan,
-              icon: _isLoading
+              onPressed: _isFormLoading ? null : _generateMealPlan,
+              icon: _isFormLoading
                   ? const SizedBox(
                       width: 20,
                       height: 20,
                       child: CircularProgressIndicator(strokeWidth: 2),
                     )
                   : const Icon(Icons.auto_awesome),
-              label: Text(_isLoading ? 'Generating...' : 'Generate Meal Plan'),
+              label:
+                  Text(_isFormLoading ? 'Generating...' : 'Generate Meal Plan'),
               style: ElevatedButton.styleFrom(
                 backgroundColor: const Color(0xFFFFC1CC),
                 padding: const EdgeInsets.symmetric(vertical: 14),

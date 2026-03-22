@@ -116,7 +116,7 @@ class Settings(BaseSettings):
     DEBUG: bool = Field(default=False)
     LOG_LEVEL: str = Field(default="INFO")
     # Server runtime settings (allow .env entries like PORT and NODE_ENV)
-    PORT: int = Field(default=3000, description="Server port")
+    PORT: int = Field(default=8000, description="Server port")
     NODE_ENV: str = Field(default="development", description="Node/Env name")
     
     # API Configuration

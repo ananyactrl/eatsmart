@@ -1,0 +1,7 @@
+{
+  "server_ip": "192.168.1.2",
+  "server_port": 8000,
+  "base_url": "http://192.168.1.2:8000",
+  "docs_url": "http://192.168.1.2:8000/docs",
+  "timestamp": "hp2006"
+}

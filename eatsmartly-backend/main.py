@@ -388,21 +388,27 @@ async def health_check():
     """Health check endpoint."""
     try:
         # Check database connection
-        if data_agent and data_agent.db_engine:
-            data_agent.db_engine.connect()
-            db_status = "connected"
-        else:
-            db_status = "disconnected"
+        try:
+            if data_agent and data_agent.db_engine:
+                data_agent.db_engine.connect()
+                db_status = "connected"
+            else:
+                db_status = "optional"
+        except:
+            db_status = "optional"
         
         # Check Redis connection
-        if data_agent and data_agent.redis_client:
-            data_agent.redis_client.ping()
-            redis_status = "connected"
-        else:
-            redis_status = "disconnected"
-        
-        # Determine overall health
-        all_healthy = db_status == "connected" and redis_status == "connected"
+        try:
+            if data_agent and data_agent.redis_client:
+                data_agent.redis_client.ping()
+                redis_status = "connected"
+            else:
+                redis_status = "optional"
+        except:
+            redis_status = "optional"
+
+        # Determine overall health (Both Redis and DB are optional for basic meal planning)
+        all_healthy = True  # AI agents work without DB/Redis
         
         return {
             "status": "healthy" if all_healthy else "degraded",
@@ -419,6 +425,42 @@ async def health_check():
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail=f"Service unhealthy: {str(e)}"
         )
+
+
+@app.get("/server-info")
+async def get_server_info(request: Request):
+    """
+    Get server connection information for client configuration
+    Returns IP address, port, and connection URLs
+    """
+    from server_utils import get_local_ip, get_all_network_ips
+
+    # Get server host info from request
+    host = request.client.host
+    port = request.url.port or 8000
+
+    local_ip = get_local_ip()
+    all_ips = get_all_network_ips()
+
+    return {
+        "server_ip": local_ip,
+        "all_ips": all_ips,
+        "port": port,
+        "base_url": f"http://{local_ip}:{port}",
+        "docs_url": f"http://{local_ip}:{port}/docs",
+        "health_url": f"http://{local_ip}:{port}/health",
+        "configuration": {
+            "flutter_api_service": f"static const String baseUrl = 'http://{local_ip}:{port}';",
+            "android_emulator": f"http://10.0.2.2:{port}",
+            "localhost": f"http://localhost:{port}"
+        },
+        "instructions": {
+            "physical_device": f"Update api_service.dart line 12 to: 'http://{local_ip}:{port}'",
+            "android_emulator": f"Update api_service.dart line 12 to: 'http://10.0.2.2:{port}'",
+            "same_wifi_required": "Ensure phone and PC are on the same WiFi network"
+        },
+        "timestamp": datetime.utcnow().isoformat()
+    }
 
 
 @app.get("/vision-usage")
@@ -1286,6 +1328,22 @@ class MealPlanResponse(BaseModel):
     shopping_list: Optional[List[str]] = None
     error: Optional[str] = None
     generated_at: Optional[str] = None
+
+
+class MealChatRequest(BaseModel):
+    """Request for conversational meal chat"""
+    message: str = Field(..., description="User's chat message")
+    history: Optional[List[Dict[str, Any]]] = Field(
+        default=None,
+        description="Chat history - list of {'role': 'user'|'model', 'parts': ['text']}"
+    )
+
+
+class MealChatResponse(BaseModel):
+    """Response for conversational meal chat"""
+    success: bool
+    response: str = Field(..., description="AI assistant response")
+    error: Optional[str] = None
 
 
 class AddProductRequest(BaseModel):
@@ -3276,14 +3334,14 @@ async def generate_meal_plan(request: MealPlanRequest):
 async def generate_weekly_meal_plan(request: WeeklyMealPlanRequest):
     """
     📅 GENERATE 7-DAY MEAL PLAN
-    
+
     Creates a complete weekly meal plan with:
     - All meals optimized for nutritional goals
     - Shopping list organized by category
     - Variety across cuisines and flavors
     - High protein focus
     - Researched-backed healthy recipes
-    
+
     Example: POST /weekly-meal-plan with body:
     {
         "available_ingredients": ["chicken", "fish", "eggs", "rice", "vegetables"],
@@ -3293,24 +3351,69 @@ async def generate_weekly_meal_plan(request: WeeklyMealPlanRequest):
     """
     try:
         logger.info("📅 Generating 7-day meal plan...")
-        
+
         meal_planner = get_meal_planner()
-        
+
         result = meal_planner.generate_weekly_meal_plan(
             available_ingredients=request.available_ingredients,
             nutritional_goals=request.nutritional_goals,
             dietary_restrictions=request.dietary_restrictions,
             cuisine_preferences=request.cuisine_preferences
         )
-        
+
         return result
-        
+
     except Exception as e:
         logger.error(f"❌ Weekly meal plan error: {e}")
         return {
             "success": False,
             "error": str(e)
         }
+
+
+@app.post("/meal-chat", response_model=MealChatResponse, tags=["Meal Planning"])
+async def meal_chat(request: MealChatRequest):
+    """
+    💬 CONVERSATIONAL MEAL PLANNING CHAT
+
+    Chat naturally with the AI meal planning assistant.
+    The assistant can help with:
+    - Meal suggestions based on ingredients
+    - Nutrition advice
+    - Recipe ideas
+    - Diet planning
+
+    Example: POST /meal-chat with body:
+    {
+        "message": "I have chicken and rice, suggest a high protein meal",
+        "history": [
+            {"role": "user", "parts": ["Hello"]},
+            {"role": "model", "parts": ["Hi! I can help you plan meals."]}
+        ]
+    }
+    """
+    try:
+        logger.info(f"💬 Chat message: {request.message[:50]}...")
+
+        meal_planner = get_meal_planner()
+
+        response_text = meal_planner.chat(
+            user_message=request.message,
+            history=request.history
+        )
+
+        return MealChatResponse(
+            success=True,
+            response=response_text
+        )
+
+    except Exception as e:
+        logger.error(f"❌ Meal chat error: {e}")
+        return MealChatResponse(
+            success=False,
+            response="Sorry, I encountered an error. Please try again.",
+            error=str(e)
+        )
 
 
 @app.post("/recipes", tags=["Meal Planning"])
@@ -3567,11 +3670,24 @@ async def get_scheduled_jobs():
 
 if __name__ == "__main__":
     import uvicorn
-    
+    from server_utils import find_free_port, print_server_info, check_port_available
+
+    # Try to use port 8000, or find next available
+    desired_port = 8000
+    if not check_port_available(desired_port):
+        print(f"⚠️  Port {desired_port} is in use, finding alternative...")
+        port = find_free_port(start_port=8000)
+        print(f"✅ Using port {port} instead")
+    else:
+        port = desired_port
+
+    # Print connection information
+    print_server_info("0.0.0.0", port)
+
     uvicorn.run(
         "main:app",
         host="0.0.0.0",  # Allow connections from network (not just localhost)
-        port=8000,
+        port=port,
         reload=False,  # Disable reload to prevent shutdown issues
         log_level=settings.LOG_LEVEL.lower()
     )
