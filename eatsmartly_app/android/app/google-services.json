@@ -1,0 +1,54 @@
+{
+  "project_info": {
+    "project_number": "523410830428",
+    "project_id": "eatsmartly-4d8d1",
+    "storage_bucket": "eatsmartly-4d8d1.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:523410830428:android:1954854839d13b9774a299",
+        "android_client_info": {
+          "package_name": "com.eatsmartly.app"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "523410830428-cs1qjf9kutrahj9qdgr284i06os3m114.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.eatsmartly.app",
+            "certificate_hash": "b1561ea4cd0c2d525be6edc630cc50541d433c6c"
+          }
+        },
+        {
+          "client_id": "523410830428-7ifab6h9ou2c13kto6qt6bi5hcsb7umf.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDeNJTg0hSNcmF1evvj9N4LH7Pp9HmW7bo"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "523410830428-7ifab6h9ou2c13kto6qt6bi5hcsb7umf.apps.googleusercontent.com",
+              "client_type": 3
+            },
+            {
+              "client_id": "523410830428-jo5mepbarn198ev3dr9rs0dv0k3qj15u.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "com.apple.eatsmartly"
+              }
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

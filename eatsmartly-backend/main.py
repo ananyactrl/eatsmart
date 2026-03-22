@@ -346,16 +346,63 @@ class FoodAnalysisResponse(BaseModel):
 
 
 class UserProfileRequest(BaseModel):
-    """Request model for user profile."""
+    """Request model for comprehensive user health profile."""
+    # Layer 1: Body Context
     age: Optional[int] = None
     gender: Optional[str] = None
     height_cm: Optional[float] = None
     weight_kg: Optional[float] = None
     activity_level: Optional[str] = None
     health_goal: Optional[str] = None
-    allergies: Optional[List[str]] = []
+
+    # Calculated values (optional - will be computed server-side)
+    bmr_calories: Optional[float] = None
+    tdee_calories: Optional[float] = None
+    target_calories: Optional[float] = None
+    target_protein_g: Optional[float] = None
+    target_carbs_g: Optional[float] = None
+    target_fat_g: Optional[float] = None
+
+    # Layer 2: Health Context
     health_conditions: Optional[List[str]] = []
+    allergies: Optional[List[str]] = []
     dietary_restrictions: Optional[List[str]] = []
+    medications: Optional[List[str]] = []
+
+    # Layer 3: Life Context
+    dietary_type: Optional[str] = None
+    cuisine_preferences: Optional[List[str]] = []
+    cooking_skill: Optional[str] = None
+    max_cooking_time_minutes: Optional[int] = None
+    budget_per_meal_inr: Optional[int] = None
+    household_size: Optional[int] = None
+    cooking_for_kids: Optional[bool] = False
+    kitchen_equipment: Optional[List[str]] = []
+
+    # Profile metadata
+    profile_completed: Optional[bool] = False
+
+
+class UserProfileResponse(BaseModel):
+    """Response model for user profile operations."""
+    success: bool
+    message: Optional[str] = None
+    profile: Optional[UserProfileRequest] = None
+    error: Optional[str] = None
+
+
+class MealChatRequest(BaseModel):
+    """Request model for meal planning chat with optional profile."""
+    message: str
+    history: Optional[List[Dict[str, Any]]] = []
+    user_profile: Optional[UserProfileRequest] = None  # NEW: Include profile in chat
+
+
+class MealChatResponse(BaseModel):
+    """Response model for meal planning chat."""
+    success: bool
+    response: str
+    error: Optional[str] = None
 
 
 class SearchRequest(BaseModel):
@@ -1331,11 +1378,15 @@ class MealPlanResponse(BaseModel):
 
 
 class MealChatRequest(BaseModel):
-    """Request for conversational meal chat"""
+    """Request for conversational meal chat with optional user profile"""
     message: str = Field(..., description="User's chat message")
     history: Optional[List[Dict[str, Any]]] = Field(
         default=None,
         description="Chat history - list of {'role': 'user'|'model', 'parts': ['text']}"
+    )
+    user_profile: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="User's comprehensive health profile for personalized recommendations"
     )
 
 
@@ -3399,7 +3450,8 @@ async def meal_chat(request: MealChatRequest):
 
         response_text = meal_planner.chat(
             user_message=request.message,
-            history=request.history
+            history=request.history,
+            user_profile=request.user_profile  # Pass profile data
         )
 
         return MealChatResponse(
@@ -3412,6 +3464,123 @@ async def meal_chat(request: MealChatRequest):
         return MealChatResponse(
             success=False,
             response="Sorry, I encountered an error. Please try again.",
+            error=str(e)
+        )
+
+
+# ==================== COMPREHENSIVE HEALTH PROFILE ENDPOINTS ====================
+
+@app.post("/user-profile", response_model=UserProfileResponse, tags=["User Profile"])
+async def save_user_profile(profile: UserProfileRequest):
+    """
+    🏥 SAVE COMPREHENSIVE USER HEALTH PROFILE
+
+    Save a complete user health profile including:
+    - Body context (age, weight, activity level, goals)
+    - Health context (conditions, allergies, medications)
+    - Life context (cooking constraints, budget, equipment)
+
+    The system automatically calculates BMR, TDEE, and macro targets.
+    This profile data is used to personalize all meal recommendations.
+    """
+    try:
+        logger.info("💾 Saving comprehensive user profile...")
+
+        # Convert to dict for easy manipulation
+        profile_data = profile.dict()
+
+        # Calculate BMR, TDEE, and macro targets if body data is provided
+        if all([profile.age, profile.gender, profile.weight_kg, profile.height_cm]):
+            # BMR calculation using Mifflin-St Jeor equation
+            if profile.gender == 'male':
+                bmr = (10 * profile.weight_kg) + (6.25 * profile.height_cm) - (5 * profile.age) + 5
+            else:
+                bmr = (10 * profile.weight_kg) + (6.25 * profile.height_cm) - (5 * profile.age) - 161
+
+            # TDEE calculation based on activity level
+            activity_multipliers = {
+                'sedentary': 1.2,
+                'light': 1.375,
+                'moderate': 1.55,
+                'active': 1.725,
+                'very_active': 1.9
+            }
+            multiplier = activity_multipliers.get(profile.activity_level, 1.55)
+            tdee = bmr * multiplier
+
+            # Target calories based on goal
+            goal_adjustments = {
+                'lose_fat': -300,    # 300 cal deficit
+                'gain_muscle': +200, # 200 cal surplus
+                'bulk': +400,        # 400 cal surplus
+                'recomp': 0,         # At maintenance
+                'maintain': 0        # Maintain current
+            }
+            adjustment = goal_adjustments.get(profile.health_goal, 0)
+            target_calories = tdee + adjustment
+
+            # Macro calculation (protein priority approach)
+            protein_multipliers = {
+                'lose_fat': 2.2,     # High protein for muscle retention
+                'gain_muscle': 2.0,  # High protein for growth
+                'bulk': 1.8,         # Moderate protein
+                'recomp': 2.2,       # High protein for body comp
+                'maintain': 1.6      # General health
+            }
+            protein_mult = protein_multipliers.get(profile.health_goal, 1.6)
+            target_protein = profile.weight_kg * protein_mult
+
+            target_fat = target_calories * 0.25 / 9  # 25% calories from fat
+            remaining_calories = target_calories - (target_protein * 4) - (target_fat * 9)
+            target_carbs = remaining_calories / 4
+
+            # Update profile data with calculated values
+            profile_data.update({
+                'bmr_calories': round(bmr, 2),
+                'tdee_calories': round(tdee, 2),
+                'target_calories': round(target_calories, 2),
+                'target_protein_g': round(target_protein, 2),
+                'target_carbs_g': round(target_carbs, 2),
+                'target_fat_g': round(target_fat, 2)
+            })
+
+            logger.info(f"✅ Calculated targets: {int(target_calories)} cal, {int(target_protein)}g protein daily")
+
+        return UserProfileResponse(
+            success=True,
+            message="Profile saved successfully with calculated nutrition targets",
+            profile=UserProfileRequest(**profile_data)
+        )
+
+    except Exception as e:
+        logger.error(f"❌ Profile save error: {e}")
+        return UserProfileResponse(
+            success=False,
+            error=str(e)
+        )
+
+
+@app.get("/user-profile/{user_id}", response_model=UserProfileResponse, tags=["User Profile"])
+async def get_user_profile(user_id: str):
+    """
+    📋 GET USER HEALTH PROFILE
+
+    Retrieve a user's comprehensive health profile by user ID.
+    Returns all profile data including calculated nutrition targets.
+    """
+    try:
+        logger.info(f"🔍 Fetching profile for user: {user_id}")
+
+        # TODO: Fetch from Supabase database when connected
+        return UserProfileResponse(
+            success=False,
+            message="Profile retrieval not yet implemented - database connection needed"
+        )
+
+    except Exception as e:
+        logger.error(f"❌ Profile fetch error: {e}")
+        return UserProfileResponse(
+            success=False,
             error=str(e)
         )
 

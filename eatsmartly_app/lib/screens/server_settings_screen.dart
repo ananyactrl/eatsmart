@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../services/api_service.dart';
 import '../services/server_discovery.dart';
+import '../theme.dart';
 
 class ServerSettingsScreen extends StatefulWidget {
   const ServerSettingsScreen({Key? key}) : super(key: key);
@@ -115,10 +116,10 @@ class _ServerSettingsScreenState extends State<ServerSettingsScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFFFFF8E1),
+      backgroundColor: AppColors.cream,
       appBar: AppBar(
         title: const Text('Server Settings'),
-        backgroundColor: const Color(0xFFFFC1CC),
+        backgroundColor: AppColors.rose,
         elevation: 0,
       ),
       body: SingleChildScrollView(
@@ -176,7 +177,7 @@ class _ServerSettingsScreenState extends State<ServerSettingsScreen> {
                     ? 'Searching for server...'
                     : '🔍 Auto-Discover Server'),
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFFAFA231),
+                  backgroundColor: AppColors.coral,
                   foregroundColor: Colors.white,
                   padding: const EdgeInsets.symmetric(vertical: 14),
                 ),
@@ -332,7 +333,7 @@ class _ServerSettingsScreenState extends State<ServerSettingsScreen> {
                     icon: const Icon(Icons.save),
                     label: const Text('Save'),
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFFFFC1CC),
+                      backgroundColor: AppColors.rose,
                       foregroundColor: Colors.black87,
                       padding: const EdgeInsets.symmetric(vertical: 14),
                     ),
@@ -383,8 +384,8 @@ class _ServerSettingsScreenState extends State<ServerSettingsScreen> {
           _urlController.text = url;
         });
       },
-      backgroundColor: const Color(0xFFFFF8E1),
-      side: const BorderSide(color: Color(0xFFFFC1CC)),
+      backgroundColor: AppColors.cream,
+      side: const BorderSide(color: AppColors.rose),
     );
   }
 

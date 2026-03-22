@@ -125,20 +125,23 @@ class MealPlannerAgent:
     # CHAT — main method called by your Flutter chat screen
     # ------------------------------------------------------------------
 
-    def chat(self, user_message: str, history: Optional[List[Dict]] = None) -> str:
+    def chat(self, user_message: str, history: Optional[List[Dict]] = None, user_profile: Optional[Dict[str, Any]] = None) -> str:
         """
-        Handle a single conversational message with data-driven nutrition responses.
+        Handle a single conversational message with profile-aware, data-driven nutrition responses.
 
         Args:
             user_message: What the user typed
             history: List of {"role": "user"|"model", "parts": ["text"]}
                      Pass the last 6 messages max for context.
+            user_profile: User's comprehensive health profile data
 
         Returns:
-            Plain text response (no markdown) with accurate nutrition data
+            Plain text response (no markdown) with personalized, accurate nutrition data
         """
         try:
             logger.info(f"Processing chat message: {user_message[:50]}...")
+            if user_profile:
+                logger.info(f"Using profile: {user_profile.get('age')}y {user_profile.get('gender')}, goal: {user_profile.get('health_goal')}")
 
             # Extract ingredients from the user message
             ingredients = self._extract_ingredients(user_message)
@@ -147,16 +150,16 @@ class MealPlannerAgent:
             # If we have ingredients, use nutrition database for accurate responses
             if ingredients and self.nutrition_db and self.nutrition_db.df is not None:
                 logger.info("Using nutrition database for data-driven response")
-                return self._get_data_driven_response(ingredients, user_message)
+                return self._get_profile_aware_response(ingredients, user_message, user_profile)
 
-            # For general chat or if no nutrition data available, use AI
+            # For general chat or if no nutrition data available, use AI with profile context
             if not self.is_fallback and self.chat_model is not None:
-                logger.info("Using AI model for general response")
-                return self._get_ai_response(user_message, history)
+                logger.info("Using AI model for profile-aware response")
+                return self._get_ai_response_with_profile(user_message, history, user_profile)
 
-            # Fallback response
-            logger.info("Using fallback response")
-            return self._get_fallback_response(user_message)
+            # Fallback response with profile consideration
+            logger.info("Using fallback response with profile awareness")
+            return self._get_profile_aware_fallback(user_message, user_profile)
 
         except Exception as e:
             logger.error(f"Chat error details: {type(e).__name__}: {str(e)}")
@@ -185,30 +188,192 @@ class MealPlannerAgent:
 
         return found_ingredients
 
-    def _get_data_driven_response(self, ingredients: List[str], user_message: str) -> str:
-        """Get response using nutrition database with exact nutritional data"""
+    def _get_profile_aware_response(self, ingredients: List[str], user_message: str, user_profile: Optional[Dict[str, Any]] = None) -> str:
+        """Get response using nutrition database with profile-specific personalization"""
         try:
             # Get recipe suggestions from database
             recipes = self.nutrition_db.get_recipe_suggestions(ingredients)
 
             if not recipes:
-                return "I couldn't find exact recipes for those ingredients in my database. Try asking about chicken, rice, pasta, or other common ingredients."
+                profile_note = ""
+                if user_profile:
+                    allergies = user_profile.get('allergies', [])
+                    conditions = user_profile.get('health_conditions', [])
+                    if allergies:
+                        profile_note = f" Also, I'll make sure to avoid {', '.join(allergies)} due to your allergies."
+                    elif conditions:
+                        profile_note = f" I'll consider your {conditions[0]} when suggesting alternatives."
 
-            # Format recipes using actual nutrition data
+                return f"I couldn't find exact recipes for those ingredients in my database. Try asking about chicken, rice, pasta, or other common ingredients.{profile_note}"
+
+            # Format recipes using actual nutrition data + profile context
             response_parts = []
             for i, recipe in enumerate(recipes[:2]):  # Max 2 recipes
                 formatted_recipe = self.nutrition_db.format_recipe_with_nutrition(recipe)
+                if formatted_recipe and user_profile:
+                    # Add profile-specific notes
+                    formatted_recipe = self._add_profile_context_to_recipe(formatted_recipe, user_profile)
+
                 if formatted_recipe:
                     response_parts.append(formatted_recipe)
 
             if response_parts:
-                return "\n\n".join(response_parts)
+                profile_summary = ""
+                if user_profile:
+                    target_cal = user_profile.get('target_calories')
+                    target_protein = user_profile.get('target_protein_g')
+                    if target_cal:
+                        meal_cal = int(target_cal * 0.3)  # 30% per meal
+                        meal_protein = int(target_protein * 0.3) if target_protein else 20
+                        profile_summary = f"\n\nFor your {user_profile.get('health_goal', 'health')} goal, aim for ~{meal_cal} calories and ~{meal_protein}g protein per meal."
+
+                return "\n\n".join(response_parts) + profile_summary
             else:
                 return "I found matching ingredients but couldn't format the recipes. Please try rephrasing your request."
 
         except Exception as e:
-            logger.error(f"Data-driven response error: {e}")
-            return self._get_fallback_response(user_message)
+            logger.error(f"Profile-aware response error: {e}")
+            return self._get_profile_aware_fallback(user_message, user_profile)
+
+    def _get_ai_response_with_profile(self, user_message: str, history: Optional[List[Dict]] = None, user_profile: Optional[Dict[str, Any]] = None) -> str:
+        """Get response from AI model with profile context"""
+        try:
+            # Build enhanced prompt with profile context
+            enhanced_message = user_message
+            if user_profile:
+                profile_context = self._build_profile_context_string(user_profile)
+                enhanced_message = f"{profile_context}\n\nUser request: {user_message}"
+
+            # Build Gemini-format history (last 6 turns = 3 exchanges)
+            gemini_history = []
+            if history:
+                for msg in history[-6:]:
+                    role = msg.get("role", "user")
+                    content = msg.get("parts", msg.get("content", ""))
+                    if isinstance(content, list):
+                        content = content[0]
+                    if role in ("user", "model") and content:
+                        gemini_history.append({
+                            "role": role,
+                            "parts": [str(content)]
+                        })
+
+            chat_session = self.chat_model.start_chat(history=gemini_history)
+            response = chat_session.send_message(enhanced_message)
+
+            return self._clean_text(response.text)
+
+        except Exception as e:
+            logger.error(f"AI response with profile error: {e}")
+            raise e
+
+    def _get_profile_aware_fallback(self, user_message: str, user_profile: Optional[Dict[str, Any]] = None) -> str:
+        """Smart fallback responses with profile awareness"""
+        message_lower = user_message.lower()
+
+        # Profile-specific context
+        profile_context = ""
+        dietary_restrictions = []
+
+        if user_profile:
+            # Add allergy awareness
+            allergies = user_profile.get('allergies', [])
+            if allergies:
+                dietary_restrictions.extend([f"no {allergy}" for allergy in allergies])
+
+            # Add dietary type
+            dietary_type = user_profile.get('dietary_type', 'omnivore')
+            if dietary_type in ['vegetarian', 'vegan', 'eggetarian']:
+                dietary_restrictions.append(dietary_type)
+
+            # Add health condition considerations
+            conditions = user_profile.get('health_conditions', [])
+            if 'diabetes' in conditions:
+                dietary_restrictions.append("low-GI foods")
+            if 'hypertension' in conditions:
+                dietary_restrictions.append("low-sodium")
+
+            if dietary_restrictions:
+                profile_context = f" (Note: I'll suggest {', '.join(dietary_restrictions)} options for you)"
+
+        # Enhanced responses with profile awareness
+        if any(word in message_lower for word in ['hello', 'hi', 'hey']):
+            return f"Hello! I'm your meal planning assistant.{profile_context} Tell me what ingredients you have and I'll suggest personalized recipes with accurate nutrition information."
+
+        elif any(word in message_lower for word in ['help', 'what', 'how']):
+            return f"I can help you with personalized meal planning using my nutrition database!{profile_context} Just tell me what ingredients you have (like chicken, rice, pasta) and I'll suggest recipes tailored to your profile with exact calories and protein information."
+
+        else:
+            return f"I specialize in personalized meal planning with accurate nutrition data.{profile_context} Tell me what ingredients you have available and I'll suggest specific recipes that match your health goals!"
+
+    def _add_profile_context_to_recipe(self, recipe_text: str, user_profile: Dict[str, Any]) -> str:
+        """Add profile-specific notes to a recipe"""
+        additions = []
+
+        # Health condition specific notes
+        conditions = user_profile.get('health_conditions', [])
+        if 'diabetes' in conditions and ('rice' in recipe_text.lower() or 'potato' in recipe_text.lower()):
+            additions.append("💡 For diabetes: Consider brown rice or smaller portions to manage blood sugar")
+
+        if 'hypertension' in conditions and ('salt' in recipe_text.lower() or 'sodium' in recipe_text.lower()):
+            additions.append("💡 For hypertension: Use herbs and spices instead of excess salt")
+
+        if 'pcos' in conditions:
+            additions.append("💡 For PCOS: This balanced meal helps with insulin sensitivity")
+
+        # Goal-specific notes
+        goal = user_profile.get('health_goal')
+        if goal == 'lose_fat':
+            additions.append("🎯 For fat loss: This fits your calorie deficit goal")
+        elif goal == 'gain_muscle':
+            additions.append("🎯 For muscle gain: Great protein content for your goals")
+
+        # Budget awareness
+        budget = user_profile.get('budget_per_meal_inr')
+        if budget and budget < 80:
+            additions.append(f"💰 Budget-friendly: Estimated cost ~₹{budget-20}-₹{budget}")
+
+        if additions:
+            return recipe_text + "\n\n" + "\n".join(additions)
+
+        return recipe_text
+
+    def _build_profile_context_string(self, user_profile: Dict[str, Any]) -> str:
+        """Build a concise profile context string for AI prompts"""
+        context_parts = []
+
+        if user_profile.get('age') and user_profile.get('gender'):
+            context_parts.append(f"User is {user_profile['age']}y {user_profile['gender']}")
+
+        goal = user_profile.get('health_goal')
+        if goal:
+            context_parts.append(f"goal: {goal}")
+
+        target_cal = user_profile.get('target_calories')
+        if target_cal:
+            meal_cal = int(target_cal * 0.3)
+            context_parts.append(f"needs ~{meal_cal} cal per meal")
+
+        allergies = user_profile.get('allergies', [])
+        if allergies:
+            context_parts.append(f"allergic to: {', '.join(allergies)}")
+
+        conditions = user_profile.get('health_conditions', [])
+        if conditions:
+            context_parts.append(f"has: {', '.join(conditions[:2])}")  # Limit to 2 conditions
+
+        dietary_type = user_profile.get('dietary_type')
+        if dietary_type and dietary_type != 'omnivore':
+            context_parts.append(f"diet: {dietary_type}")
+
+        budget = user_profile.get('budget_per_meal_inr')
+        if budget:
+            context_parts.append(f"₹{budget}/meal budget")
+
+        if context_parts:
+            return f"PROFILE: {', '.join(context_parts)}"
+
+        return ""
 
     def _get_ai_response(self, user_message: str, history: Optional[List[Dict]] = None) -> str:
         """Get response from AI model"""
@@ -336,10 +501,13 @@ class MealPlannerAgent:
         meal_type: str = "balanced",
         num_meals: int = 5,
         cooking_time_limit: int = 30,
+        user_profile: Optional[Dict[str, Any]] = None,  # NEW: Health profile data
     ) -> Dict[str, Any]:
-        """Generate a structured meal plan. Returns dict with meals list."""
+        """Generate a structured meal plan using comprehensive user profile data."""
         try:
             logger.info(f"Generating {meal_type} meal plan with {num_meals} meals")
+            if user_profile:
+                logger.info(f"Using health profile for user: {user_profile.get('age')}y {user_profile.get('gender')}, goal: {user_profile.get('health_goal')}")
 
             prompt = self._build_meal_plan_prompt(
                 available_ingredients,
@@ -349,6 +517,7 @@ class MealPlannerAgent:
                 meal_type,
                 num_meals,
                 cooking_time_limit,
+                user_profile,  # Pass profile data
             )
 
             response = self.gen_model.generate_content(prompt)
@@ -366,6 +535,13 @@ class MealPlannerAgent:
                 "meal_type": meal_type,
                 "available_ingredients": available_ingredients,
                 "nutritional_goals": nutritional_goals,
+                "user_profile_summary": {
+                    "age": user_profile.get('age') if user_profile else None,
+                    "goal": user_profile.get('health_goal') if user_profile else None,
+                    "target_calories": user_profile.get('target_calories') if user_profile else None,
+                    "conditions": user_profile.get('health_conditions', []) if user_profile else [],
+                    "allergies": user_profile.get('allergies', []) if user_profile else [],
+                } if user_profile else None,
                 "meals": meals,
                 "shopping_list": self._generate_shopping_list(meals),
                 "generated_at": datetime.now().isoformat(),
@@ -568,6 +744,7 @@ Write in plain text only. No markdown formatting.
         meal_type,
         num_meals,
         cooking_time_limit,
+        user_profile=None,  # NEW: Health profile data
     ) -> str:
         meal_type_desc = {
             "balanced": "40% carbs, 30% protein, 30% fat",
@@ -576,25 +753,109 @@ Write in plain text only. No markdown formatting.
             "muscle_gain": "high calories and protein for muscle building",
         }.get(meal_type, "balanced macros")
 
-        return f"""You are an expert nutritionist. Generate exactly {num_meals} meal suggestions.
+        # Build comprehensive user context from health profile
+        user_context = ""
+        if user_profile:
+            # Body context for calorie/macro targets
+            if user_profile.get('age') and user_profile.get('gender'):
+                user_context += f"\nUSER PROFILE:\n"
+                user_context += f"- {user_profile.get('age')} year old {user_profile.get('gender')}, {user_profile.get('weight_kg')}kg, {user_profile.get('height_cm')}cm\n"
+                user_context += f"- Activity level: {user_profile.get('activity_level', 'moderate')}\n"
+                user_context += f"- Goal: {user_profile.get('health_goal', 'maintain')}\n"
 
-Available ingredients: {', '.join(available_ingredients)}
-Meal type: {meal_type} ({meal_type_desc})
-Nutritional goals per meal: {json.dumps(nutritional_goals)}
-Dietary restrictions: {', '.join(dietary_restrictions) if dietary_restrictions else 'None'}
-Cuisine: {', '.join(cuisine_preferences) if cuisine_preferences else 'Indian preferred, varied'}
-Max cooking time: {cooking_time_limit} minutes
+                # Calculated targets
+                if user_profile.get('target_calories'):
+                    user_context += f"- Daily calorie target: {int(user_profile['target_calories'])} kcal\n"
+                    user_context += f"- Daily protein target: {int(user_profile.get('target_protein_g', 0))}g\n"
 
-For each meal write exactly this format:
+                    # Per-meal targets (assuming 3 meals + 1 snack)
+                    meal_calories = int(user_profile['target_calories'] * 0.3)  # 30% per main meal
+                    meal_protein = int(user_profile.get('target_protein_g', 0) * 0.3)
+                    user_context += f"- Target per meal: ~{meal_calories} kcal, ~{meal_protein}g protein\n"
+
+            # Health context for ingredient flagging
+            health_conditions = user_profile.get('health_conditions', [])
+            if health_conditions:
+                user_context += f"- Health conditions: {', '.join(health_conditions)} (flag concerning ingredients accordingly)\n"
+
+                # Specific condition guidelines
+                condition_flags = []
+                if 'diabetes' in health_conditions:
+                    condition_flags.append("avoid refined sugar and high-GI carbs")
+                if 'pcos' in health_conditions:
+                    condition_flags.append("focus on low-GI foods, avoid processed foods")
+                if 'hypertension' in health_conditions:
+                    condition_flags.append("limit sodium, avoid processed meats")
+                if 'hypothyroid' in health_conditions:
+                    condition_flags.append("limit raw cruciferous vegetables, ensure iodine")
+                if 'ibs' in health_conditions:
+                    condition_flags.append("follow low-FODMAP principles, avoid spicy foods")
+
+                if condition_flags:
+                    user_context += f"- Medical guidelines: {'; '.join(condition_flags)}\n"
+
+            # Allergy flags
+            allergies = user_profile.get('allergies', [])
+            if allergies:
+                user_context += f"- STRICT ALLERGIES (absolutely avoid): {', '.join(allergies)}\n"
+
+            # Life context for practical constraints
+            dietary_type = user_profile.get('dietary_type', 'omnivore')
+            user_context += f"- Diet type: {dietary_type}\n"
+
+            budget = user_profile.get('budget_per_meal_inr')
+            if budget:
+                user_context += f"- Budget per meal: ₹{budget} (suggest budget-appropriate ingredients)\n"
+
+            max_time = user_profile.get('max_cooking_time_minutes', cooking_time_limit)
+            user_context += f"- Max cooking time: {max_time} minutes\n"
+
+            cooking_skill = user_profile.get('cooking_skill', 'intermediate')
+            user_context += f"- Cooking skill: {cooking_skill} (adjust recipe complexity)\n"
+
+            # Kitchen equipment constraints
+            equipment = user_profile.get('kitchen_equipment', [])
+            if equipment:
+                user_context += f"- Available equipment: {', '.join(equipment)}\n"
+            else:
+                user_context += f"- Basic equipment only (stovetop, basic utensils)\n"
+
+            # Household considerations
+            household_size = user_profile.get('household_size', 1)
+            cooking_for_kids = user_profile.get('cooking_for_kids', False)
+            if household_size > 1:
+                user_context += f"- Cooking for {household_size} people\n"
+            if cooking_for_kids:
+                user_context += f"- Include kid-friendly options (mild spices, familiar flavors)\n"
+
+        return f"""You are an expert Indian nutritionist creating personalized meal recommendations.
+{user_context}
+
+INGREDIENTS AVAILABLE: {', '.join(available_ingredients)}
+MEAL TYPE: {meal_type} ({meal_type_desc})
+NUTRITIONAL GOALS: {json.dumps(nutritional_goals)}
+DIETARY RESTRICTIONS: {', '.join(dietary_restrictions) if dietary_restrictions else 'None'}
+CUISINE PREFERENCES: {', '.join(cuisine_preferences) if cuisine_preferences else 'Indian preferred, varied'}
+
+CRITICAL REQUIREMENTS:
+1. NEVER suggest ingredients from the allergy list above
+2. Adapt recipes for the user's cooking skill level and available equipment
+3. Stay within the specified budget and time constraints
+4. Consider health conditions when selecting ingredients and cooking methods
+5. Target the calculated calorie and protein goals per meal
+6. Use available ingredients as the primary base for each recipe
+
+Generate exactly {num_meals} meal suggestions in this format:
 
 MEAL [number]: [Meal name]
 Cuisine: [type]
-Cooking time: [X] minutes
-Difficulty: [Easy/Medium/Hard]
+Cooking time: [X] minutes (within user's limit)
+Difficulty: [Easy/Medium/Hard based on user's skill]
 Ingredients: [ingredient 1], [ingredient 2], [ingredient 3]
-How to cook: [3 to 5 step instructions as numbered list]
+How to cook: [step-by-step instructions numbered 1-5]
 Nutrition: [calories] cal, [protein]g protein, [carbs]g carbs, [fat]g fat
-Why healthy: [one sentence backed by nutrition science]
+Health note: [specific benefit for user's profile/conditions]
+Budget estimate: [₹X per serving]
 
 Write in plain text only. No markdown, no asterisks, no bold text.
 """
@@ -631,7 +892,8 @@ Write in plain text only. No markdown, no asterisks, no bold text.
             ]
             meal["instructions"] = self._extract_field(full_text, "How to cook")
             meal["nutrition_text"] = self._extract_field(full_text, "Nutrition")
-            meal["why_healthy"] = self._extract_field(full_text, "Why healthy")
+            meal["health_note"] = self._extract_field(full_text, "Health note")  # NEW field
+            meal["budget_estimate"] = self._extract_field(full_text, "Budget estimate")  # NEW field
             meal["description"] = block[:300]
 
             if meal.get("name"):

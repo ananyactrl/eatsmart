@@ -45,11 +45,11 @@ class ResultScreen extends StatelessWidget {
     final isPasta = (analysis.foodName ?? '').toLowerCase().contains('pasta');
 
     return Scaffold(
-      backgroundColor: const Color(0xFFFFF8E1),
+      backgroundColor: AppColors.cream,
       appBar: AppBar(
         title: const Text('Analysis Result'),
         elevation: 0,
-        backgroundColor: const Color(0xFFFFC1CC),
+        backgroundColor: AppColors.rose,
         actions: [
           IconButton(
             icon: const Icon(Icons.share),
@@ -69,36 +69,23 @@ class ResultScreen extends StatelessWidget {
               Container(
                 width: double.infinity,
                 height: 180,
-                color: const Color(0xFFFFC1CC),
+                color: AppColors.blush,
                 child: ClipRRect(
                   child: Image.asset(
                     'asset/kitchen poster for pasta lover minimal illustration art line art.jpeg',
                     fit: BoxFit.cover,
                     errorBuilder: (c, e, s) => Container(
-                      color: const Color(0xFFFFEFF1),
-                      child: const Icon(
-                        Icons.fastfood,
-                        size: 80,
-                        color: Color(0xFFFFC1CC),
-                      ),
+                      color: AppColors.blush,
+                      child: const Icon(Icons.fastfood, size: 80, color: AppColors.coral),
                     ),
                   ),
                 ),
               ),
 
-            // Hero header with gradient
+            // Hero header
             Container(
               width: double.infinity,
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                  colors: [
-                    const Color(0xFFFFC1CC).withOpacity(0.3),
-                    const Color(0xFFFFEFF1).withOpacity(0.2),
-                  ],
-                ),
-              ),
+              color: AppColors.blush,
               child: Padding(
                 padding: const EdgeInsets.all(24),
                 child: Column(
@@ -110,7 +97,7 @@ class ResultScreen extends StatelessWidget {
                       style: const TextStyle(
                         fontSize: 28,
                         fontWeight: FontWeight.bold,
-                        color: Color(0xFF4C0004),
+                        color: AppColors.dark,
                         height: 1.2,
                       ),
                     ),
@@ -122,7 +109,7 @@ class ResultScreen extends StatelessWidget {
                           vertical: 6,
                         ),
                         decoration: BoxDecoration(
-                          color: const Color(0xFFFFC1CC).withOpacity(0.2),
+                          color: AppColors.blush,
                           borderRadius: BorderRadius.circular(12),
                         ),
                         child: Text(
@@ -130,7 +117,7 @@ class ResultScreen extends StatelessWidget {
                           style: const TextStyle(
                             fontSize: 16,
                             fontWeight: FontWeight.w600,
-                            color: Color(0xFFAFA231),
+                            color: AppColors.muted,
                           ),
                         ),
                       ),

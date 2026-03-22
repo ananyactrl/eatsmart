@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
-import 'package:google_fonts/google_fonts.dart';
 import '../services/api_service.dart';
 import '../theme.dart';
 import 'result_screen.dart';
@@ -14,14 +13,12 @@ class ScannerScreen extends StatefulWidget {
 
 class _ScannerScreenState extends State<ScannerScreen> {
   final EatSmartlyAPI api = EatSmartlyAPI();
-  final String userId = 'test_user'; // Replace with actual user ID from auth
+  final String userId = 'test_user';
 
   MobileScannerController cameraController = MobileScannerController();
   bool isProcessing = false;
-  String? error;
   String statusMessage = 'Analyzing product...';
   int progressStep = 0;
-  bool isOcrProcessing = false;
 
   @override
   void dispose() {
@@ -31,192 +28,114 @@ class _ScannerScreenState extends State<ScannerScreen> {
 
   Future<void> _analyzeBarcode(String barcode) async {
     if (isProcessing) return;
-
     if (!mounted) return;
-    setState(() {
-      isProcessing = true;
-      error = null;
-      statusMessage = 'Scanning barcode: $barcode';
-      progressStep = 1;
-    });
+    setState(() { isProcessing = true; statusMessage = 'Scanning barcode...'; progressStep = 1; });
 
-    // Update progress messages
-    _updateProgress(2, 'Searching Open Food Facts India...');
+    _updateProgress(2, 'Searching food databases...');
     await Future.delayed(const Duration(milliseconds: 500));
-
-    _updateProgress(3, 'Checking global food databases...');
+    _updateProgress(3, 'Checking nutrition sources...');
     await Future.delayed(const Duration(milliseconds: 500));
-
-    _updateProgress(4, 'Querying 4 nutrition sources...');
+    _updateProgress(4, 'Processing data...');
     await Future.delayed(const Duration(milliseconds: 500));
 
     try {
-      _updateProgress(
-          4, 'Processing data from backend...\nThis may take 30-60 seconds');
-
-      final result = await api.analyzeBarcode(
-          barcode: barcode, userId: userId, detailed: true);
-
-      _updateProgress(5, 'Analysis complete! ✓');
-      await Future.delayed(const Duration(milliseconds: 500));
-
+      _updateProgress(4, 'Analyzing ingredients...\nThis may take 30-60 seconds');
+      final result = await api.analyzeBarcode(barcode: barcode, userId: userId, detailed: true);
+      _updateProgress(5, 'Done ✓');
+      await Future.delayed(const Duration(milliseconds: 300));
       if (mounted) {
-        // Navigate to results screen
-        Navigator.push(
-          context,
-          MaterialPageRoute(
-            builder: (context) => ResultScreen(analysis: result),
-          ),
-        ).then((_) {
-          // Reset state when coming back
-          if (mounted) {
-            setState(() {
-              isProcessing = false;
-              progressStep = 0;
-              statusMessage = 'Analyzing product...';
-            });
-          }
+        Navigator.push(context, MaterialPageRoute(builder: (_) => ResultScreen(analysis: result)))
+            .then((_) {
+          if (mounted) setState(() { isProcessing = false; progressStep = 0; statusMessage = 'Analyzing product...'; });
         });
       }
     } catch (e) {
       if (mounted) {
-        setState(() {
-          error = e.toString().replaceAll('Exception: ', '');
-          isProcessing = false;
-          progressStep = 0;
-        });
-      }
-
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(error ?? 'Unknown error'),
-            backgroundColor: AppColors.error,
-            duration: const Duration(seconds: 5),
-            action: SnackBarAction(
-              label: 'Retry',
-              textColor: Colors.white,
-              onPressed: () => _analyzeBarcode(barcode),
-            ),
-          ),
-        );
+        setState(() { isProcessing = false; progressStep = 0; });
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(e.toString().replaceAll('Exception: ', '')),
+          backgroundColor: AppColors.error,
+          action: SnackBarAction(label: 'Retry', textColor: Colors.white, onPressed: () => _analyzeBarcode(barcode)),
+        ));
       }
     }
   }
 
   void _updateProgress(int step, String message) {
     if (!mounted) return;
-    setState(() {
-      progressStep = step;
-      statusMessage = message;
-    });
+    setState(() { progressStep = step; statusMessage = message; });
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFFFFF8E1),
-      appBar: AppBar(
-        backgroundColor: const Color(0xFFFFC1CC),
-        title: Text('Scan Barcode',
-            style: GoogleFonts.youngSerif(
-                fontSize: 18, fontWeight: FontWeight.w700)),
-      ),
+      backgroundColor: Colors.black,
       body: Stack(
         children: [
-          // Camera view
+          // Camera
           MobileScanner(
             controller: cameraController,
             onDetect: (capture) {
-              final List<Barcode> barcodes = capture.barcodes;
+              final barcodes = capture.barcodes;
               if (barcodes.isNotEmpty && !isProcessing) {
                 final barcode = barcodes.first.rawValue;
-                if (barcode != null && barcode.isNotEmpty) {
-                  _analyzeBarcode(barcode);
-                }
+                if (barcode != null && barcode.isNotEmpty) _analyzeBarcode(barcode);
               }
             },
           ),
 
-          // Scanning overlay
-          CustomPaint(
-            painter: ScannerOverlayPainter(),
-            child: Container(),
-          ),
+          // Overlay
+          CustomPaint(painter: ScannerOverlayPainter(), child: Container()),
 
-          // Instructions
+          // Top instruction card
           Positioned(
-            top: 40,
-            left: 0,
-            right: 0,
+            top: MediaQuery.of(context).padding.top + 16,
+            left: 16, right: 16,
             child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-              child: Card(
-                color: const Color(0xFFFFC1CC), // pastel pink
-                shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12)),
-                child: Padding(
-                  padding: const EdgeInsets.all(16),
-                  child: Text(
-                    'Position the barcode within the frame',
-                    textAlign: TextAlign.center,
-                    style: GoogleFonts.youngSerif(
-                      color: Colors.white,
-                      fontSize: 16,
-                      fontWeight: FontWeight.w600,
-                    ),
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+              decoration: BoxDecoration(
+                color: AppColors.rose,
+                borderRadius: BorderRadius.circular(20),
+              ),
+              child: Row(
+                children: const [
+                  Icon(Icons.qr_code_scanner, color: Colors.white, size: 22),
+                  SizedBox(width: 10),
+                  Expanded(
+                    child: Text('Point camera at a barcode', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700, fontSize: 15)),
                   ),
-                ),
+                ],
               ),
             ),
           ),
 
-          // Loading indicator
+          // Processing overlay
           if (isProcessing)
             Container(
-              color: Colors.black45,
+              color: Colors.black54,
               child: Center(
-                child: Card(
-                  color: Colors.white,
-                  shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12)),
-                  child: Padding(
-                    padding: const EdgeInsets.all(20),
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        CircularProgressIndicator(
-                          color: const Color(0xFFFFC1CC), // pastel pink
+                child: Container(
+                  margin: const EdgeInsets.symmetric(horizontal: 40),
+                  padding: const EdgeInsets.all(28),
+                  decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(24)),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      SizedBox(
+                        width: 64, height: 64,
+                        child: CircularProgressIndicator(
                           value: progressStep / 5,
+                          strokeWidth: 6,
+                          backgroundColor: AppColors.blush,
+                          valueColor: const AlwaysStoppedAnimation<Color>(AppColors.rose),
                         ),
-                        const SizedBox(height: 14),
-                        Text(
-                          statusMessage,
-                          textAlign: TextAlign.center,
-                          style: GoogleFonts.youngSerif(
-                            color: const Color(0xFF4C0004),
-                            fontSize: 16,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                        const SizedBox(height: 8),
-                        Text(
-                          'Step $progressStep of 5',
-                          style: GoogleFonts.youngSerif(
-                            color: const Color(0xFFAFA231),
-                            fontSize: 12,
-                          ),
-                        ),
-                        const SizedBox(height: 8),
-                        Text(
-                          'This may take up to 60 seconds',
-                          style: GoogleFonts.youngSerif(
-                            color: const Color(0xFF5A5A5A),
-                            fontSize: 11,
-                          ),
-                        ),
-                      ],
-                    ),
+                      ),
+                      const SizedBox(height: 20),
+                      Text(statusMessage, textAlign: TextAlign.center,
+                        style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: AppColors.dark)),
+                      const SizedBox(height: 8),
+                      Text('Step $progressStep of 5', style: const TextStyle(fontSize: 12, color: AppColors.muted)),
+                    ],
                   ),
                 ),
               ),
@@ -224,39 +143,12 @@ class _ScannerScreenState extends State<ScannerScreen> {
 
           // Bottom controls
           Positioned(
-            bottom: 40,
-            left: 0,
-            right: 0,
+            bottom: 40, left: 0, right: 0,
             child: Row(
               mainAxisAlignment: MainAxisAlignment.spaceEvenly,
               children: [
-                // Toggle flash
-                FloatingActionButton(
-                  heroTag: 'flash',
-                  backgroundColor: const Color(0xFFFFC1CC), // pastel pink
-                  onPressed: () => cameraController.toggleTorch(),
-                  child: const Icon(Icons.flash_on, color: Colors.white),
-                ),
-
-                // Flip camera
-                FloatingActionButton(
-                  heroTag: 'flip',
-                  backgroundColor: const Color(0xFFFFC1CC),
-                  onPressed: () => cameraController.switchCamera(),
-                  child: const Icon(Icons.flip_camera_ios, color: Colors.white),
-                ),
-
-                // OCR capture (disabled - requires mobile_scanner 7.0+ with takePicture support)
-                FloatingActionButton(
-                  heroTag: 'ocr',
-                  backgroundColor: const Color(0xFFFFC1CC).withOpacity(0.5),
-                  onPressed:
-                      null, // Disabled - upgrade mobile_scanner to enable
-                  child: const Opacity(
-                    opacity: 0.5,
-                    child: Icon(Icons.text_snippet, color: Colors.white),
-                  ),
-                ),
+                _cameraButton(Icons.flash_on, () => cameraController.toggleTorch()),
+                _cameraButton(Icons.flip_camera_ios, () => cameraController.switchCamera()),
               ],
             ),
           ),
@@ -264,85 +156,46 @@ class _ScannerScreenState extends State<ScannerScreen> {
       ),
     );
   }
+
+  Widget _cameraButton(IconData icon, VoidCallback onTap) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        width: 56, height: 56,
+        decoration: BoxDecoration(color: AppColors.rose, shape: BoxShape.circle),
+        child: Icon(icon, color: Colors.white, size: 24),
+      ),
+    );
+  }
 }
 
-/// Custom painter for scanner overlay
 class ScannerOverlayPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
-    final paint = Paint()
-      ..color = Colors.black54
-      ..style = PaintingStyle.fill;
-
+    final paint = Paint()..color = Colors.black54..style = PaintingStyle.fill;
     final scanArea = Rect.fromCenter(
       center: Offset(size.width / 2, size.height / 2),
-      width: size.width * 0.7,
-      height: size.height * 0.4,
+      width: size.width * 0.7, height: size.height * 0.35,
     );
-
-    // Draw dark overlay with transparent scan area
     final path = Path()
       ..addRect(Rect.fromLTWH(0, 0, size.width, size.height))
-      ..addRRect(RRect.fromRectAndRadius(scanArea, const Radius.circular(16)))
+      ..addRRect(RRect.fromRectAndRadius(scanArea, const Radius.circular(20)))
       ..fillType = PathFillType.evenOdd;
-
     canvas.drawPath(path, paint);
 
-    // Draw corner brackets
-    final bracketPaint = Paint()
-      ..color = const Color(0xFFFFC1CC)
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 4;
-
-    const bracketLength = 30.0;
-
-    // Top-left
-    canvas.drawLine(
-      Offset(scanArea.left, scanArea.top + bracketLength),
-      Offset(scanArea.left, scanArea.top),
-      bracketPaint,
-    );
-    canvas.drawLine(
-      Offset(scanArea.left, scanArea.top),
-      Offset(scanArea.left + bracketLength, scanArea.top),
-      bracketPaint,
-    );
-
-    // Top-right
-    canvas.drawLine(
-      Offset(scanArea.right - bracketLength, scanArea.top),
-      Offset(scanArea.right, scanArea.top),
-      bracketPaint,
-    );
-    canvas.drawLine(
-      Offset(scanArea.right, scanArea.top),
-      Offset(scanArea.right, scanArea.top + bracketLength),
-      bracketPaint,
-    );
-
-    // Bottom-left
-    canvas.drawLine(
-      Offset(scanArea.left, scanArea.bottom - bracketLength),
-      Offset(scanArea.left, scanArea.bottom),
-      bracketPaint,
-    );
-    canvas.drawLine(
-      Offset(scanArea.left, scanArea.bottom),
-      Offset(scanArea.left + bracketLength, scanArea.bottom),
-      bracketPaint,
-    );
-
-    // Bottom-right
-    canvas.drawLine(
-      Offset(scanArea.right - bracketLength, scanArea.bottom),
-      Offset(scanArea.right, scanArea.bottom),
-      bracketPaint,
-    );
-    canvas.drawLine(
-      Offset(scanArea.right, scanArea.bottom - bracketLength),
-      Offset(scanArea.right, scanArea.bottom),
-      bracketPaint,
-    );
+    final bracketPaint = Paint()..color = AppColors.rose..style = PaintingStyle.stroke..strokeWidth = 3;
+    const bl = 28.0;
+    // corners
+    for (final corner in [
+      [scanArea.left, scanArea.top, 1.0, 1.0],
+      [scanArea.right, scanArea.top, -1.0, 1.0],
+      [scanArea.left, scanArea.bottom, 1.0, -1.0],
+      [scanArea.right, scanArea.bottom, -1.0, -1.0],
+    ]) {
+      final x = corner[0]; final y = corner[1]; final dx = corner[2]; final dy = corner[3];
+      canvas.drawLine(Offset(x, y), Offset(x + dx * bl, y), bracketPaint);
+      canvas.drawLine(Offset(x, y), Offset(x, y + dy * bl), bracketPaint);
+    }
   }
 
   @override

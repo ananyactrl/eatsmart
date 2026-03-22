@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:google_fonts/google_fonts.dart';
+import '../theme.dart';
 
 class ProductDetailScreen extends StatelessWidget {
   final Map<String, String> item;
@@ -7,12 +7,11 @@ class ProductDetailScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final name = item['name'] ?? 'Millet Noodles';
-    final note = item['note'] ?? 'Millet-based noodles';
-    final image = item['image'] ?? 'asset/milet.jpeg';
-    final price = item['price'] ?? '\u20B9 40';
+    final name = item['name'] ?? 'Product';
+    final note = item['note'] ?? '';
+    final image = item['image'] ?? '';
+    final price = item['price'] ?? '₹0';
 
-    // Nutrition facts for millet noodles (approx per serving)
     final nutrition = {
       'Calories': '220 kcal',
       'Protein': '7 g',
@@ -22,154 +21,126 @@ class ProductDetailScreen extends StatelessWidget {
     };
 
     return Scaffold(
-      backgroundColor: const Color(0xFFFFF8E1),
-      appBar: AppBar(
-        backgroundColor: Colors.transparent,
-        elevation: 0,
-        iconTheme: const IconThemeData(color: Colors.black87),
-        title: Text(name, style: GoogleFonts.youngSerif(color: Colors.black87)),
-      ),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(18.0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            // Large product card (image placeholder)
-            Card(
-              shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(16)),
-              child: Column(
+      backgroundColor: AppColors.cream,
+      body: SafeArea(
+        child: SingleChildScrollView(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Hero image card
+              Stack(
                 children: [
                   Container(
-                    height: 260,
-                    decoration: BoxDecoration(
-                      color: const Color(0xFFFFEFF1),
-                      borderRadius:
-                          const BorderRadius.vertical(top: Radius.circular(16)),
-                    ),
-                    child: Center(
-                      child: ClipRRect(
-                        borderRadius: BorderRadius.circular(12),
-                        child: Image.asset(
-                          image,
-                          width: 220,
-                          height: 220,
-                          fit: BoxFit.cover,
-                          errorBuilder: (c, e, s) => const Icon(
-                              Icons.image_not_supported,
-                              size: 80,
-                              color: Colors.black26),
-                        ),
+                    height: 280,
+                    width: double.infinity,
+                    color: AppColors.blush,
+                    child: Image.asset(image, fit: BoxFit.cover,
+                      errorBuilder: (c, e, s) => const Center(child: Text('🍱', style: TextStyle(fontSize: 80)))),
+                  ),
+                  Positioned(
+                    top: 16, left: 16,
+                    child: GestureDetector(
+                      onTap: () => Navigator.pop(context),
+                      child: Container(
+                        width: 40, height: 40,
+                        decoration: BoxDecoration(color: Colors.white, shape: BoxShape.circle,
+                          boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.1), blurRadius: 8)]),
+                        child: const Icon(Icons.arrow_back_rounded, color: AppColors.dark, size: 20),
                       ),
                     ),
                   ),
-                  Padding(
-                    padding: const EdgeInsets.all(14.0),
-                    child: Column(
+                ],
+              ),
+
+              Padding(
+                padding: const EdgeInsets.all(20),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // Name + price row
+                    Row(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text(name,
-                            style: GoogleFonts.youngSerif(
-                                fontSize: 20, fontWeight: FontWeight.w700)),
-                        const SizedBox(height: 6),
-                        Text(note,
-                            style: const TextStyle(color: Colors.black54)),
-                        const SizedBox(height: 12),
-                        Row(
+                        Expanded(child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Text('\u20B9 40',
-                                style: TextStyle(
-                                    fontWeight: FontWeight.w700,
-                                    color: Colors.black87,
-                                    fontSize: 18)),
-                            const Spacer(),
-                            Container(
-                              decoration: BoxDecoration(
-                                  color: Colors.white,
-                                  borderRadius: BorderRadius.circular(8)),
-                              child: Row(
-                                children: const [
-                                  Padding(
-                                      padding:
-                                          EdgeInsets.symmetric(horizontal: 8.0),
-                                      child: Icon(Icons.remove)),
-                                  Padding(
-                                      padding:
-                                          EdgeInsets.symmetric(horizontal: 8.0),
-                                      child: Text('1')),
-                                  Padding(
-                                      padding:
-                                          EdgeInsets.symmetric(horizontal: 8.0),
-                                      child: Icon(Icons.add)),
-                                ],
-                              ),
-                            )
+                            Text(name, style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w800, color: AppColors.dark)),
+                            const SizedBox(height: 4),
+                            Text(note, style: const TextStyle(color: AppColors.muted, fontSize: 14)),
                           ],
+                        )),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                          decoration: BoxDecoration(color: AppColors.blush, borderRadius: BorderRadius.circular(12)),
+                          child: Text(price, style: const TextStyle(fontWeight: FontWeight.w800, color: AppColors.rose, fontSize: 16)),
                         ),
                       ],
                     ),
-                  )
-                ],
-              ),
-            ),
-            const SizedBox(height: 18),
-            Text('About Product',
-                style: GoogleFonts.youngSerif(
-                    fontSize: 18, fontWeight: FontWeight.w600)),
-            const SizedBox(height: 8),
-            Text(
-                'Millet noodles are made from whole-grain millets — a nutritious alternative to refined wheat noodles. They provide more protein and fiber, with a lower glycemic response compared to regular noodles.',
-                style: const TextStyle(color: Colors.black87)),
-            const SizedBox(height: 16),
-            Text('Nutrition Facts (per serving)',
-                style: GoogleFonts.youngSerif(
-                    fontSize: 16, fontWeight: FontWeight.w600)),
-            const SizedBox(height: 8),
-            Card(
-              color: Colors.white,
-              shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12)),
-              child: Padding(
-                padding: const EdgeInsets.all(12.0),
-                child: Column(
-                  children: nutrition.entries
-                      .map((e) => Padding(
-                            padding: const EdgeInsets.symmetric(vertical: 6.0),
-                            child: Row(
-                              children: [
-                                Text(e.key,
-                                    style: const TextStyle(
-                                        fontWeight: FontWeight.w600)),
-                                const Spacer(),
-                                Text(e.value)
-                              ],
-                            ),
-                          ))
-                      .toList(),
+
+                    const SizedBox(height: 20),
+
+                    // About section
+                    const Text('About', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: AppColors.dark)),
+                    const SizedBox(height: 8),
+                    Container(
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(color: AppColors.white, borderRadius: BorderRadius.circular(16),
+                        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 8)]),
+                      child: const Text(
+                        'Made from whole-grain millets — a nutritious alternative to refined wheat. Provides more protein and fiber with a lower glycemic response.',
+                        style: TextStyle(color: AppColors.muted, fontSize: 14, height: 1.5),
+                      ),
+                    ),
+
+                    const SizedBox(height: 20),
+
+                    // Nutrition facts
+                    const Text('Nutrition Facts', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: AppColors.dark)),
+                    const SizedBox(height: 10),
+                    Container(
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(color: AppColors.white, borderRadius: BorderRadius.circular(16),
+                        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 8)]),
+                      child: Column(
+                        children: nutrition.entries.map((e) => Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 8),
+                          child: Row(
+                            children: [
+                              Text(e.key, style: const TextStyle(fontWeight: FontWeight.w600, color: AppColors.dark)),
+                              const Spacer(),
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                                decoration: BoxDecoration(color: AppColors.blush, borderRadius: BorderRadius.circular(8)),
+                                child: Text(e.value, style: const TextStyle(fontWeight: FontWeight.w700, color: AppColors.rose, fontSize: 13)),
+                              ),
+                            ],
+                          ),
+                        )).toList(),
+                      ),
+                    ),
+
+                    const SizedBox(height: 24),
+
+                    // Add to bag button
+                    SizedBox(
+                      width: double.infinity,
+                      child: ElevatedButton.icon(
+                        onPressed: () => ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(content: Text('Added to bag'), backgroundColor: AppColors.success)),
+                        icon: const Icon(Icons.shopping_bag_outlined),
+                        label: const Text('Add to Bag'),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: AppColors.rose, foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(vertical: 16),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
               ),
-            ),
-            const SizedBox(height: 18),
-            SizedBox(
-              width: double.infinity,
-              child: ElevatedButton(
-                onPressed: () {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('Added to bag (demo)')));
-                },
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFFFFC1CC),
-                  foregroundColor: Colors.black,
-                  padding: const EdgeInsets.symmetric(vertical: 14),
-                  shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12)),
-                ),
-                child: const Text('Add to Bag'),
-              ),
-            ),
-            const SizedBox(height: 12),
-          ],
+            ],
+          ),
         ),
       ),
     );

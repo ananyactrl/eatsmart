@@ -413,15 +413,18 @@ class EatSmartlyAPI {
     }
   }
 
-  /// Chat with meal planning assistant
+  /// Chat with meal planning assistant (with optional profile data)
   Future<Map<String, dynamic>> mealChat({
     required String message,
     List<Map<String, dynamic>>? history,
+    Map<String, dynamic>? userProfile, // NEW: Include user profile
   }) async {
     try {
       final requestBody = {
         'message': message,
         'history': history,
+        if (userProfile != null)
+          'user_profile': userProfile, // Include profile if available
       };
 
       final response = await http
@@ -447,6 +450,143 @@ class EatSmartlyAPI {
       } else {
         throw Exception('Chat error: $e');
       }
+    }
+  }
+
+  /// Save comprehensive user health profile
+  Future<Map<String, dynamic>> saveUserProfile(
+      Map<String, dynamic> profile) async {
+    try {
+      final response = await http
+          .post(
+            Uri.parse('$baseUrl/user-profile'),
+            headers: headers,
+            body: json.encode(profile),
+          )
+          .timeout(timeout);
+
+      if (response.statusCode == 200) {
+        final result = json.decode(response.body);
+
+        // Save profile locally for quick access
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setString('user_health_profile', json.encode(profile));
+
+        return result;
+      } else {
+        throw Exception('Profile save failed: ${response.body}');
+      }
+    } catch (e) {
+      if (e.toString().contains('SocketException') ||
+          e.toString().contains('ConnectionRefused')) {
+        throw Exception(
+            'Cannot connect to server. Please check your connection.');
+      } else if (e.toString().contains('TimeoutException')) {
+        throw Exception('Connection timeout. Please try again.');
+      } else {
+        throw Exception('Profile save error: $e');
+      }
+    }
+  }
+
+  /// Get comprehensive user health profile by user ID
+  Future<Map<String, dynamic>?> getComprehensiveProfile(String userId) async {
+    try {
+      final response = await http
+          .get(
+            Uri.parse('$baseUrl/user-profile/$userId'),
+            headers: headers,
+          )
+          .timeout(timeout);
+
+      if (response.statusCode == 200) {
+        return json.decode(response.body);
+      } else if (response.statusCode == 404) {
+        return null; // Profile not found
+      } else {
+        throw Exception('Profile fetch failed: ${response.body}');
+      }
+    } catch (e) {
+      if (e.toString().contains('SocketException') ||
+          e.toString().contains('ConnectionRefused')) {
+        throw Exception(
+            'Cannot connect to server. Please check your connection.');
+      } else if (e.toString().contains('TimeoutException')) {
+        throw Exception('Connection timeout. Please try again.');
+      } else {
+        throw Exception('Profile fetch error: $e');
+      }
+    }
+  }
+
+  /// Update comprehensive user health profile
+  Future<Map<String, dynamic>> updateComprehensiveProfile(
+      String userId, Map<String, dynamic> profile) async {
+    try {
+      final response = await http
+          .put(
+            Uri.parse('$baseUrl/user-profile/$userId'),
+            headers: headers,
+            body: json.encode(profile),
+          )
+          .timeout(timeout);
+
+      if (response.statusCode == 200) {
+        final result = json.decode(response.body);
+
+        // Update locally saved profile
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setString('user_health_profile', json.encode(profile));
+
+        return result;
+      } else {
+        throw Exception('Profile update failed: ${response.body}');
+      }
+    } catch (e) {
+      if (e.toString().contains('SocketException') ||
+          e.toString().contains('ConnectionRefused')) {
+        throw Exception(
+            'Cannot connect to server. Please check your connection.');
+      } else if (e.toString().contains('TimeoutException')) {
+        throw Exception('Connection timeout. Please try again.');
+      } else {
+        throw Exception('Profile update error: $e');
+      }
+    }
+  }
+
+  /// Get locally saved user profile (for offline access)
+  static Future<Map<String, dynamic>?> getLocalUserProfile() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final profileJson = prefs.getString('user_health_profile');
+      if (profileJson != null) {
+        return json.decode(profileJson);
+      }
+      return null;
+    } catch (e) {
+      print('Error loading local profile: $e');
+      return null;
+    }
+  }
+
+  /// Check if user has completed their health profile
+  static Future<bool> hasCompletedProfile() async {
+    try {
+      final profile = await getLocalUserProfile();
+      return profile?['profile_completed'] == true;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  /// Clear locally saved profile (for logout)
+  static Future<void> clearLocalProfile() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove('user_health_profile');
+    } catch (e) {
+      print('Error clearing local profile: $e');
     }
   }
 }

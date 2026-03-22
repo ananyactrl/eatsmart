@@ -1,10 +1,11 @@
-import 'package:flutter/material.dart';
+﻿import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 import '../theme.dart';
 import '../services/api_service.dart';
+import '../services/auth_service.dart';
 
 class MealPlannerScreen extends StatefulWidget {
   const MealPlannerScreen({Key? key}) : super(key: key);
-
   @override
   State<MealPlannerScreen> createState() => _MealPlannerScreenState();
 }
@@ -12,28 +13,18 @@ class MealPlannerScreen extends StatefulWidget {
 class _MealPlannerScreenState extends State<MealPlannerScreen> {
   final EatSmartlyAPI api = EatSmartlyAPI();
   late TextEditingController _ingredientsController;
-
   bool _isLoading = false;
-  bool _isFormLoading = false; // Separate loading state for form
+  bool _isFormLoading = false;
   Map<String, dynamic>? _mealPlanResult;
-  String? _error;
-
-  // Mode toggle
   bool _isChatMode = false;
-
-  // Chat fields
   final List<Map<String, dynamic>> _chatMessages = [];
-  final List<Map<String, dynamic>> _chatHistory = []; // For AI context
+  final List<Map<String, dynamic>> _chatHistory = [];
   final TextEditingController _chatInputController = TextEditingController();
   final ScrollController _chatScrollController = ScrollController();
-
-  // Form fields
+  String _userName = '';
   final List<String> _availableIngredients = [];
-  final TextEditingController _ingredientInputController =
-      TextEditingController();
-
-  String _selectedMealType =
-      'balanced'; // balanced, high_protein, weight_loss, muscle_gain
+  final TextEditingController _ingredientInputController = TextEditingController();
+  String _selectedMealType = 'balanced';
   int _numMeals = 5;
   int _cookingTimeLimit = 30;
   final List<String> _dietaryRestrictions = [];
@@ -43,6 +34,19 @@ class _MealPlannerScreenState extends State<MealPlannerScreen> {
   void initState() {
     super.initState();
     _ingredientsController = TextEditingController();
+    _loadUserName();
+  }
+
+  Future<void> _loadUserName() async {
+    final authService = Provider.of<AuthService>(context, listen: false);
+    final profile = await authService.getUserProfile();
+    if (mounted) {
+      setState(() {
+        _userName = profile?['nickname'] ?? profile?['full_name'] ??
+            authService.currentUser?.displayName ??
+            authService.currentUser?.email?.split('@')[0] ?? '';
+      });
+    }
   }
 
   @override
@@ -55,252 +59,107 @@ class _MealPlannerScreenState extends State<MealPlannerScreen> {
   }
 
   void _addIngredient(String ingredient) {
-    if (ingredient.trim().isNotEmpty &&
-        !_availableIngredients.contains(ingredient.trim())) {
-      setState(() {
-        _availableIngredients.add(ingredient.trim());
-        _ingredientInputController.clear();
-      });
+    if (ingredient.trim().isNotEmpty && !_availableIngredients.contains(ingredient.trim())) {
+      setState(() { _availableIngredients.add(ingredient.trim()); _ingredientInputController.clear(); });
     }
   }
 
-  void _removeIngredient(String ingredient) {
-    setState(() {
-      _availableIngredients.remove(ingredient);
-    });
-  }
+  void _removeIngredient(String ingredient) => setState(() => _availableIngredients.remove(ingredient));
 
   Future<void> _generateMealPlan() async {
     if (_availableIngredients.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Please add at least one ingredient'),
-          backgroundColor: Color(0xFFE53935),
-        ),
-      );
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: const Text('Please add at least one ingredient'), backgroundColor: AppColors.error));
       return;
     }
-
-    setState(() {
-      _isFormLoading = true;
-      _error = null;
-      _mealPlanResult = null;
-    });
-
+    setState(() { _isFormLoading = true; _mealPlanResult = null; });
     try {
       final result = await api.generateMealPlan(
-        availableIngredients: _availableIngredients,
-        nutritionalGoals: _getNutritionalGoals(),
-        dietaryRestrictions:
-            _dietaryRestrictions.isEmpty ? null : _dietaryRestrictions,
-        cuisinePreferences:
-            _cuisinePreferences.isEmpty ? null : _cuisinePreferences,
-        mealType: _selectedMealType,
-        numMeals: _numMeals,
-        cookingTimeLimit: _cookingTimeLimit,
+        availableIngredients: _availableIngredients, nutritionalGoals: _getNutritionalGoals(),
+        dietaryRestrictions: _dietaryRestrictions.isEmpty ? null : _dietaryRestrictions,
+        cuisinePreferences: _cuisinePreferences.isEmpty ? null : _cuisinePreferences,
+        mealType: _selectedMealType, numMeals: _numMeals, cookingTimeLimit: _cookingTimeLimit,
       );
-
-      setState(() {
-        _mealPlanResult = result;
-        _isFormLoading = false;
-      });
+      setState(() { _mealPlanResult = result; _isFormLoading = false; });
     } catch (e) {
-      // Automatically try to discover server and retry
       final discovered = await EatSmartlyAPI.autoRediscover();
-
       if (discovered) {
-        // Show retry message
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Server found! Retrying...'),
-              duration: Duration(seconds: 2),
-            ),
-          );
-        }
-
-        // Retry the meal plan generation
         try {
           final result = await api.generateMealPlan(
-            availableIngredients: _availableIngredients,
-            nutritionalGoals: _getNutritionalGoals(),
-            dietaryRestrictions:
-                _dietaryRestrictions.isEmpty ? null : _dietaryRestrictions,
-            cuisinePreferences:
-                _cuisinePreferences.isEmpty ? null : _cuisinePreferences,
-            mealType: _selectedMealType,
-            numMeals: _numMeals,
-            cookingTimeLimit: _cookingTimeLimit,
+            availableIngredients: _availableIngredients, nutritionalGoals: _getNutritionalGoals(),
+            dietaryRestrictions: _dietaryRestrictions.isEmpty ? null : _dietaryRestrictions,
+            cuisinePreferences: _cuisinePreferences.isEmpty ? null : _cuisinePreferences,
+            mealType: _selectedMealType, numMeals: _numMeals, cookingTimeLimit: _cookingTimeLimit,
           );
-
-          setState(() {
-            _mealPlanResult = result;
-            _isFormLoading = false;
-          });
-          return; // Success!
-        } catch (retryError) {
-          // Retry failed, continue to show error
-        }
+          setState(() { _mealPlanResult = result; _isFormLoading = false; });
+          return;
+        } catch (_) {}
       }
-
-      // Discovery failed or retry failed
-      final currentUrl = EatSmartlyAPI.getCurrentBaseUrl();
-      setState(() {
-        _error = 'Cannot connect to server\n\n'
-            'Current server: $currentUrl\n\n'
-            'Please ensure:\n'
-            '- Backend server is running\n'
-            '- Phone and PC on same WiFi\n'
-            '- Run: start_server.bat';
-        _isFormLoading = false;
-      });
-
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: const Text('Connection Error: Check backend is running'),
-            backgroundColor: const Color(0xFFE53935),
-            duration: const Duration(seconds: 5),
-            action: SnackBarAction(
-              label: 'Retry',
-              textColor: Colors.white,
-              onPressed: () {
-                _generateMealPlan();
-              },
-            ),
-          ),
-        );
-      }
+      setState(() { _isFormLoading = false; });
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Cannot connect to server'), backgroundColor: AppColors.error));
     }
   }
 
   Map<String, dynamic> _getNutritionalGoals() {
     switch (_selectedMealType) {
-      case 'high_protein':
-        return {'protein_g': 50, 'calories': 2500};
-      case 'weight_loss':
-        return {'protein_g': 40, 'calories': 1800};
-      case 'muscle_gain':
-        return {'protein_g': 60, 'calories': 3000};
-      default:
-        return {'protein_g': 30, 'calories': 2000};
+      case 'high_protein': return {'protein_g': 50, 'calories': 2500};
+      case 'weight_loss': return {'protein_g': 40, 'calories': 1800};
+      case 'muscle_gain': return {'protein_g': 60, 'calories': 3000};
+      default: return {'protein_g': 30, 'calories': 2000};
     }
   }
 
   Future<void> _sendChatMessage() async {
     final message = _chatInputController.text.trim();
     if (message.isEmpty) return;
-
     setState(() {
       _chatMessages.add({'sender': 'user', 'text': message});
-      _chatMessages
-          .add({'sender': 'bot', 'text': '🤔 Thinking...', 'isTyping': true});
+      _chatMessages.add({'sender': 'bot', 'text': 'Thinking...', 'isTyping': true});
       _chatInputController.clear();
       _isLoading = true;
     });
-
-    // Add to chat history for AI context
-    _chatHistory.add({
-      'role': 'user',
-      'parts': [message]
-    });
-
-    // Scroll to bottom
-    Future.delayed(const Duration(milliseconds: 100), () {
-      if (_chatScrollController.hasClients) {
-        _chatScrollController.animateTo(
-          _chatScrollController.position.maxScrollExtent,
-          duration: const Duration(milliseconds: 300),
-          curve: Curves.easeOut,
-        );
-      }
-    });
-
+    _chatHistory.add({'role': 'user', 'parts': [message]});
+    _scrollToBottom();
     try {
-      // Use the dedicated chat endpoint
+      final userProfile = await EatSmartlyAPI.getLocalUserProfile();
       final result = await api.mealChat(
         message: message,
-        history: _chatHistory.length > 6
-            ? _chatHistory.sublist(_chatHistory.length - 6)
-            : _chatHistory,
+        history: _chatHistory.length > 6 ? _chatHistory.sublist(_chatHistory.length - 6) : _chatHistory,
+        userProfile: userProfile,
       );
-
-      final responseText =
-          result['response'] ?? 'Sorry, I could not process that.';
-
-      // Add to chat history for context
-      _chatHistory.add({
-        'role': 'model',
-        'parts': [responseText]
-      });
-
-      setState(() {
-        // Remove typing indicator and add actual response
-        _chatMessages.removeLast();
-        _chatMessages.add({'sender': 'bot', 'text': responseText});
-        _isLoading = false;
-      });
+      final responseText = result['response'] ?? 'Sorry, I could not process that.';
+      _chatHistory.add({'role': 'model', 'parts': [responseText]});
+      setState(() { _chatMessages.removeLast(); _chatMessages.add({'sender': 'bot', 'text': responseText}); _isLoading = false; });
     } catch (e) {
-      // Automatically try to discover server
       final discovered = await EatSmartlyAPI.autoRediscover();
-
       if (discovered) {
-        // Retry the request with new URL
         try {
+          final userProfile = await EatSmartlyAPI.getLocalUserProfile();
           final result = await api.mealChat(
             message: message,
-            history: _chatHistory.length > 6
-                ? _chatHistory.sublist(_chatHistory.length - 6)
-                : _chatHistory,
+            history: _chatHistory.length > 6 ? _chatHistory.sublist(_chatHistory.length - 6) : _chatHistory,
+            userProfile: userProfile,
           );
-
-          final responseText =
-              result['response'] ?? 'Sorry, I could not process that.';
-          _chatHistory.add({
-            'role': 'model',
-            'parts': [responseText]
-          });
-
-          setState(() {
-            _chatMessages.removeLast();
-            _chatMessages.add({'sender': 'bot', 'text': responseText});
-            _isLoading = false;
-          });
-
+          final responseText = result['response'] ?? 'Sorry, I could not process that.';
+          _chatHistory.add({'role': 'model', 'parts': [responseText]});
+          setState(() { _chatMessages.removeLast(); _chatMessages.add({'sender': 'bot', 'text': responseText}); _isLoading = false; });
           _scrollToBottom();
-          return; // Success!
-        } catch (retryError) {
-          // Retry failed, show error
-        }
+          return;
+        } catch (_) {}
       }
-
-      // Discovery failed or retry failed, show error
-      final currentUrl = EatSmartlyAPI.getCurrentBaseUrl();
       setState(() {
         _chatMessages.removeLast();
-        _chatMessages.add({
-          'sender': 'bot',
-          'text': 'Cannot connect to server.\n\n'
-              'Current server: $currentUrl\n\n'
-              'Please ensure:\n'
-              '- Backend server is running\n'
-              '- Phone and PC on same WiFi'
-        });
+        _chatMessages.add({'sender': 'bot', 'text': 'Cannot connect to server. Please check backend is running.'});
         _isLoading = false;
       });
     }
-
     _scrollToBottom();
   }
 
   void _scrollToBottom() {
     Future.delayed(const Duration(milliseconds: 100), () {
       if (mounted && _chatScrollController.hasClients) {
-        _chatScrollController.animateTo(
-          _chatScrollController.position.maxScrollExtent,
-          duration: const Duration(milliseconds: 300),
-          curve: Curves.easeOut,
-        );
+        _chatScrollController.animateTo(_chatScrollController.position.maxScrollExtent,
+            duration: const Duration(milliseconds: 300), curve: Curves.easeOut);
       }
     });
   }
@@ -308,191 +167,126 @@ class _MealPlannerScreenState extends State<MealPlannerScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFFFFF8E1),
-      appBar: AppBar(
-        title: const Text('AI Meal Planner'),
-        elevation: 0,
-        backgroundColor: const Color(0xFFFFC1CC),
-        centerTitle: true,
-        bottom: PreferredSize(
-          preferredSize: const Size.fromHeight(50),
-          child: Padding(
-            padding: const EdgeInsets.all(8.0),
-            child: _buildModeToggle(),
-          ),
+      backgroundColor: AppColors.cream,
+      body: SafeArea(
+        child: Column(
+          children: [
+            Container(
+              margin: const EdgeInsets.all(16),
+              padding: const EdgeInsets.all(20),
+              decoration: BoxDecoration(color: AppColors.rose, borderRadius: BorderRadius.circular(24)),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(_userName.isNotEmpty ? 'Hey $_userName 🍽️' : 'AI Meal Planner 🍽️',
+                    style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w800, color: Colors.white)),
+                  const SizedBox(height: 4),
+                  const Text('Plan meals around what you have', style: TextStyle(color: Colors.white70, fontSize: 13)),
+                  const SizedBox(height: 16),
+                  Container(
+                    decoration: BoxDecoration(color: Colors.white.withOpacity(0.2), borderRadius: BorderRadius.circular(14)),
+                    padding: const EdgeInsets.all(4),
+                    child: Row(children: [
+                      _modeTab('📋 Form', !_isChatMode, () => setState(() => _isChatMode = false)),
+                      _modeTab('💬 Chat', _isChatMode, () => setState(() => _isChatMode = true)),
+                    ]),
+                  ),
+                ],
+              ),
+            ),
+            Expanded(child: _isChatMode ? _buildChatMode() : (_mealPlanResult != null ? _buildMealPlanResult() : _buildInputForm())),
+          ],
         ),
       ),
-      body: _isChatMode
-          ? _buildChatMode()
-          : (_mealPlanResult != null
-              ? _buildMealPlanResult()
-              : _buildInputForm()),
     );
   }
 
-  Widget _buildModeToggle() {
-    return Container(
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: Row(
-        children: [
-          Expanded(
-            child: GestureDetector(
-              onTap: () {
-                setState(() => _isChatMode = false);
-              },
-              child: Container(
-                padding: const EdgeInsets.symmetric(vertical: 10),
-                decoration: BoxDecoration(
-                  color: !_isChatMode
-                      ? const Color(0xFFFFC1CC)
-                      : Colors.transparent,
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: const Center(
-                  child: Text(
-                    '📋 Form',
-                    style: TextStyle(fontWeight: FontWeight.bold),
-                  ),
-                ),
-              ),
-            ),
-          ),
-          Expanded(
-            child: GestureDetector(
-              onTap: () {
-                setState(() => _isChatMode = true);
-              },
-              child: Container(
-                padding: const EdgeInsets.symmetric(vertical: 10),
-                decoration: BoxDecoration(
-                  color: _isChatMode
-                      ? const Color(0xFFFFC1CC)
-                      : Colors.transparent,
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: const Center(
-                  child: Text(
-                    '💬 Chat',
-                    style: TextStyle(fontWeight: FontWeight.bold),
-                  ),
-                ),
-              ),
-            ),
-          ),
-        ],
+  Widget _modeTab(String label, bool active, VoidCallback onTap) {
+    return Expanded(
+      child: GestureDetector(
+        onTap: onTap,
+        child: Container(
+          padding: const EdgeInsets.symmetric(vertical: 10),
+          decoration: BoxDecoration(color: active ? Colors.white : Colors.transparent, borderRadius: BorderRadius.circular(10)),
+          child: Center(child: Text(label, style: TextStyle(fontWeight: FontWeight.w700, color: active ? AppColors.rose : Colors.white, fontSize: 14))),
+        ),
       ),
     );
   }
 
   Widget _buildChatMode() {
-    return Column(
-      children: [
-        Expanded(
-          child: _chatMessages.isEmpty
-              ? Center(
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      const Text(
-                        '🤖 Chat with AI Meal Planner',
-                        style: TextStyle(
-                          fontSize: 18,
-                          fontWeight: FontWeight.bold,
-                          color: Color(0xFF4C0004),
-                        ),
-                      ),
-                      const SizedBox(height: 12),
-                      const Padding(
-                        padding: EdgeInsets.symmetric(horizontal: 24),
-                        child: Text(
-                          'Tell me what ingredients you have and your meal preferences. I\'ll create a personalized meal plan for you!',
-                          textAlign: TextAlign.center,
-                          style: TextStyle(color: Colors.grey),
-                        ),
-                      ),
-                      const SizedBox(height: 24),
-                      const Text(
-                        'Example queries:',
-                        style: TextStyle(fontWeight: FontWeight.bold),
-                      ),
-                      const SizedBox(height: 8),
-                      const Padding(
-                        padding: EdgeInsets.symmetric(horizontal: 20),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text('• "I have chicken, rice, and broccoli"'),
-                            Text('• "High protein meal with salmon"'),
-                            Text('• "Weight loss meal with eggs and veggies"'),
-                            Text('• "I want a balanced curry with lentils"'),
-                          ],
-                        ),
-                      ),
-                    ],
-                  ),
-                )
-              : ListView.builder(
-                  controller: _chatScrollController,
-                  padding: const EdgeInsets.all(16),
-                  itemCount: _chatMessages.length,
-                  itemBuilder: (context, index) {
-                    final msg = _chatMessages[index];
-                    final isUser = msg['sender'] == 'user';
-                    final isTyping = msg['isTyping'] == true;
-                    return _buildChatBubble(
-                        msg['text'] ?? '', isUser, isTyping);
-                  },
-                ),
-        ),
-        Container(
-          padding: const EdgeInsets.all(12),
-          decoration: BoxDecoration(
-            color: Colors.white,
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withOpacity(0.1),
-                blurRadius: 8,
-                offset: const Offset(0, -2),
-              ),
-            ],
-          ),
-          child: Row(
-            children: [
-              Expanded(
-                child: TextField(
-                  controller: _chatInputController,
-                  enabled: !_isLoading,
-                  decoration: InputDecoration(
-                    hintText: 'Ask me about meal planning...',
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    contentPadding: const EdgeInsets.symmetric(
-                      horizontal: 16,
-                      vertical: 12,
-                    ),
-                  ),
-                  onSubmitted: (_) => _sendChatMessage(),
-                ),
-              ),
-              const SizedBox(width: 8),
-              IconButton(
-                onPressed: _isLoading ? null : _sendChatMessage,
-                icon: _isLoading
-                    ? const SizedBox(
-                        width: 20,
-                        height: 20,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
-                    : const Icon(Icons.send, color: Color(0xFFFFC1CC)),
-              ),
-            ],
+    return Column(children: [
+      Expanded(child: _chatMessages.isEmpty ? _buildChatEmptyState() : ListView.builder(
+        controller: _chatScrollController,
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        itemCount: _chatMessages.length,
+        itemBuilder: (context, index) {
+          final msg = _chatMessages[index];
+          return _buildChatBubble(msg['text'] ?? '', msg['sender'] == 'user', msg['isTyping'] == true);
+        },
+      )),
+      _buildChatInput(),
+    ]);
+  }
+
+  Widget _buildChatEmptyState() {
+    return Center(child: Padding(
+      padding: const EdgeInsets.all(32),
+      child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+        Container(width: 80, height: 80, decoration: const BoxDecoration(color: AppColors.blush, shape: BoxShape.circle),
+          child: const Center(child: Text('🍳', style: TextStyle(fontSize: 36)))),
+        const SizedBox(height: 20),
+        Text(_userName.isNotEmpty ? 'What shall we cook today, $_userName?' : 'What shall we cook today?',
+          style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700, color: AppColors.dark), textAlign: TextAlign.center),
+        const SizedBox(height: 8),
+        const Text('Tell me your ingredients and preferences', style: TextStyle(color: AppColors.muted, fontSize: 14), textAlign: TextAlign.center),
+        const SizedBox(height: 24),
+        Wrap(spacing: 8, runSpacing: 8, alignment: WrapAlignment.center, children: [
+          _suggestionChip('I have chicken & rice'),
+          _suggestionChip('High protein with eggs'),
+          _suggestionChip('Quick 15-min meal'),
+          _suggestionChip('Weight loss ideas'),
+        ]),
+      ]),
+    ));
+  }
+
+  Widget _suggestionChip(String text) {
+    return GestureDetector(
+      onTap: () { _chatInputController.text = text; _sendChatMessage(); },
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+        decoration: BoxDecoration(color: AppColors.blush, borderRadius: BorderRadius.circular(20)),
+        child: Text(text, style: const TextStyle(color: AppColors.rose, fontSize: 13, fontWeight: FontWeight.w600)),
+      ),
+    );
+  }
+
+  Widget _buildChatInput() {
+    return Container(
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+      decoration: BoxDecoration(color: AppColors.white,
+        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.06), blurRadius: 12, offset: const Offset(0, -4))]),
+      child: Row(children: [
+        Expanded(child: TextField(
+          controller: _chatInputController, enabled: !_isLoading,
+          decoration: InputDecoration(hintText: 'Ask about meal planning...', filled: true, fillColor: AppColors.blush,
+            border: OutlineInputBorder(borderRadius: BorderRadius.circular(16), borderSide: BorderSide.none),
+            contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12)),
+          onSubmitted: (_) => _sendChatMessage(),
+        )),
+        const SizedBox(width: 8),
+        GestureDetector(
+          onTap: _isLoading ? null : _sendChatMessage,
+          child: Container(
+            width: 44, height: 44,
+            decoration: BoxDecoration(color: AppColors.rose, borderRadius: BorderRadius.circular(14)),
+            child: _isLoading
+                ? const Padding(padding: EdgeInsets.all(10), child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                : const Icon(Icons.send_rounded, color: Colors.white, size: 20),
           ),
         ),
-      ],
+      ]),
     );
   }
 
@@ -500,650 +294,241 @@ class _MealPlannerScreenState extends State<MealPlannerScreen> {
     return Align(
       alignment: isUser ? Alignment.centerRight : Alignment.centerLeft,
       child: Container(
-        margin: const EdgeInsets.only(bottom: 12),
+        margin: const EdgeInsets.only(bottom: 10),
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+        constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.75),
         decoration: BoxDecoration(
-          color: isUser ? const Color(0xFFFFC1CC) : Colors.white,
-          borderRadius: BorderRadius.circular(12),
-          border: isUser
-              ? null
-              : Border.all(color: const Color(0xFFFFC1CC), width: 1),
-        ),
-        constraints: BoxConstraints(
-          maxWidth: MediaQuery.of(context).size.width * 0.75,
+          color: isUser ? AppColors.rose : AppColors.white,
+          borderRadius: BorderRadius.only(
+            topLeft: const Radius.circular(16), topRight: const Radius.circular(16),
+            bottomLeft: Radius.circular(isUser ? 16 : 4), bottomRight: Radius.circular(isUser ? 4 : 16),
+          ),
+          boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 6, offset: const Offset(0, 2))],
         ),
         child: isTyping
-            ? Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Flexible(
-                    child: Text(
-                      text,
-                      style: TextStyle(
-                        color:
-                            isUser ? const Color(0xFF4C0004) : Colors.black87,
-                        fontSize: 13,
-                        height: 1.4,
-                        fontStyle: FontStyle.italic,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  SizedBox(
-                    width: 20,
-                    height: 20,
-                    child: CircularProgressIndicator(
-                      strokeWidth: 2,
-                      valueColor: AlwaysStoppedAnimation<Color>(
-                        Colors.grey.shade400,
-                      ),
-                    ),
-                  ),
-                ],
-              )
-            : Text(
-                text,
-                style: TextStyle(
-                  color: isUser ? const Color(0xFF4C0004) : Colors.black87,
-                  fontSize: 13,
-                  height: 1.4,
-                ),
-              ),
+            ? Row(mainAxisSize: MainAxisSize.min, children: [
+                Text(text, style: TextStyle(color: isUser ? Colors.white : AppColors.dark, fontSize: 13)),
+                const SizedBox(width: 8),
+                SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.muted)),
+              ])
+            : Text(text, style: TextStyle(color: isUser ? Colors.white : AppColors.dark, fontSize: 13, height: 1.4)),
       ),
     );
   }
 
   Widget _buildInputForm() {
     return SingleChildScrollView(
-      padding: const EdgeInsets.all(16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // Ingredients section
-          _buildSectionHeader('🥘 Available Ingredients'),
-          const SizedBox(height: 12),
-          _buildIngredientsInput(),
-          const SizedBox(height: 12),
-          _buildIngredientsList(),
-          const SizedBox(height: 24),
-
-          // Meal Type section
-          _buildSectionHeader('🎯 Meal Type'),
-          const SizedBox(height: 12),
-          _buildMealTypeSelector(),
-          const SizedBox(height: 24),
-
-          // Number of meals
-          _buildSectionHeader('📊 Number of Meals'),
-          const SizedBox(height: 12),
-          _buildSlider(
-            'Meals: $_numMeals',
-            _numMeals.toDouble(),
-            1,
-            10,
-            (value) {
-              setState(() => _numMeals = value.toInt());
-            },
-          ),
-          const SizedBox(height: 24),
-
-          // Cooking time
-          _buildSectionHeader('⏱️ Max Cooking Time'),
-          const SizedBox(height: 12),
-          _buildSlider(
-            'Time: $_cookingTimeLimit minutes',
-            _cookingTimeLimit.toDouble(),
-            5,
-            120,
-            (value) {
-              setState(() => _cookingTimeLimit = value.toInt());
-            },
-          ),
-          const SizedBox(height: 24),
-
-          // Generate button
-          SizedBox(
-            width: double.infinity,
-            child: ElevatedButton.icon(
-              onPressed: _isFormLoading ? null : _generateMealPlan,
-              icon: _isFormLoading
-                  ? const SizedBox(
-                      width: 20,
-                      height: 20,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
-                  : const Icon(Icons.auto_awesome),
-              label:
-                  Text(_isFormLoading ? 'Generating...' : 'Generate Meal Plan'),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFFFFC1CC),
-                padding: const EdgeInsets.symmetric(vertical: 14),
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildIngredientsInput() {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: const Color(0xFFFFC1CC), width: 2),
-      ),
-      child: Row(
-        children: [
-          Expanded(
-            child: TextField(
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        _sectionLabel('🥘 Ingredients'),
+        const SizedBox(height: 10),
+        Container(
+          decoration: BoxDecoration(color: AppColors.white, borderRadius: BorderRadius.circular(16),
+            boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 8)]),
+          padding: const EdgeInsets.symmetric(horizontal: 12),
+          child: Row(children: [
+            Expanded(child: TextField(
               controller: _ingredientInputController,
-              decoration: const InputDecoration(
-                hintText: 'Enter ingredient (e.g., chicken, rice)',
-                border: InputBorder.none,
-              ),
-              onSubmitted: (value) {
-                _addIngredient(value);
-              },
+              decoration: const InputDecoration(hintText: 'Add ingredient (e.g. chicken, rice)',
+                border: InputBorder.none, fillColor: Colors.transparent, filled: false),
+              onSubmitted: _addIngredient,
+            )),
+            GestureDetector(
+              onTap: () => _addIngredient(_ingredientInputController.text),
+              child: Container(padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(color: AppColors.rose, borderRadius: BorderRadius.circular(10)),
+                child: const Icon(Icons.add, color: Colors.white, size: 18)),
             ),
-          ),
-          IconButton(
-            icon: const Icon(Icons.add_circle, color: Color(0xFFFFC1CC)),
-            onPressed: () {
-              _addIngredient(_ingredientInputController.text);
-            },
-          ),
+          ]),
+        ),
+        if (_availableIngredients.isNotEmpty) ...[
+          const SizedBox(height: 10),
+          Wrap(spacing: 8, runSpacing: 8, children: _availableIngredients.map((ing) => Chip(
+            label: Text(ing, style: const TextStyle(color: AppColors.dark, fontSize: 13)),
+            deleteIcon: const Icon(Icons.close, size: 16, color: AppColors.muted),
+            onDeleted: () => _removeIngredient(ing),
+            backgroundColor: AppColors.blush, side: BorderSide.none,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          )).toList()),
         ],
-      ),
-    );
-  }
-
-  Widget _buildIngredientsList() {
-    if (_availableIngredients.isEmpty) {
-      return Container(
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          color: Colors.white.withOpacity(0.5),
-          borderRadius: BorderRadius.circular(12),
+        const SizedBox(height: 20),
+        _sectionLabel('🎯 Meal Type'),
+        const SizedBox(height: 10),
+        ...[ 
+          ['balanced', '⚖️ Balanced', 'Balanced macronutrients'],
+          ['high_protein', '💪 High Protein', 'Maximum protein for muscle building'],
+          ['weight_loss', '⬇️ Weight Loss', 'Low calorie, high protein'],
+          ['muscle_gain', '🏋️ Muscle Gain', 'High calories and protein'],
+        ].map((opt) => _mealTypeCard(opt[0], opt[1], opt[2])),
+        const SizedBox(height: 20),
+        _sectionLabel('📊 Number of Meals: $_numMeals'),
+        Slider(value: _numMeals.toDouble(), min: 1, max: 10, divisions: 9, activeColor: AppColors.rose,
+          onChanged: (v) => setState(() => _numMeals = v.toInt())),
+        _sectionLabel('⏱️ Max Cooking Time: ${_cookingTimeLimit}min'),
+        Slider(value: _cookingTimeLimit.toDouble(), min: 5, max: 120, divisions: 23, activeColor: AppColors.coral,
+          onChanged: (v) => setState(() => _cookingTimeLimit = v.toInt())),
+        const SizedBox(height: 16),
+        SizedBox(
+          width: double.infinity,
+          child: ElevatedButton.icon(
+            onPressed: _isFormLoading ? null : _generateMealPlan,
+            icon: _isFormLoading
+                ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                : const Icon(Icons.auto_awesome),
+            label: Text(_isFormLoading ? 'Generating...' : 'Generate Meal Plan'),
+            style: ElevatedButton.styleFrom(backgroundColor: AppColors.rose, foregroundColor: Colors.white,
+              padding: const EdgeInsets.symmetric(vertical: 16),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16))),
+          ),
         ),
-        child: const Text(
-          'No ingredients added yet. Add some to get started!',
-          textAlign: TextAlign.center,
-          style: TextStyle(color: Colors.grey),
-        ),
-      );
-    }
-
-    return Wrap(
-      spacing: 8,
-      runSpacing: 8,
-      children: _availableIngredients
-          .map(
-            (ingredient) => Chip(
-              label: Text(ingredient),
-              deleteIcon: const Icon(Icons.close),
-              onDeleted: () => _removeIngredient(ingredient),
-              backgroundColor: const Color(0xFFFFC1CC),
-              labelStyle: const TextStyle(color: Color(0xFF4C0004)),
-            ),
-          )
-          .toList(),
+      ]),
     );
   }
 
-  Widget _buildMealTypeSelector() {
-    return Column(
-      children: [
-        _buildSelectableButton(
-            'balanced', '⚖️ Balanced', 'Balanced macronutrients'),
-        const SizedBox(height: 8),
-        _buildSelectableButton('high_protein', '💪 High Protein',
-            'Maximum protein for muscle building'),
-        const SizedBox(height: 8),
-        _buildSelectableButton(
-            'weight_loss', '⬇️ Weight Loss', 'Low calorie, high protein'),
-        const SizedBox(height: 8),
-        _buildSelectableButton(
-            'muscle_gain', '🏋️ Muscle Gain', 'High calories and protein'),
-      ],
-    );
-  }
+  Widget _sectionLabel(String text) => Text(text, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: AppColors.dark));
 
-  Widget _buildSelectableButton(String value, String title, String subtitle) {
+  Widget _mealTypeCard(String value, String title, String subtitle) {
     final isSelected = _selectedMealType == value;
     return GestureDetector(
-      onTap: () {
-        setState(() => _selectedMealType = value);
-      },
+      onTap: () => setState(() => _selectedMealType = value),
       child: Container(
-        padding: const EdgeInsets.all(12),
+        margin: const EdgeInsets.only(bottom: 8),
+        padding: const EdgeInsets.all(14),
         decoration: BoxDecoration(
-          color: isSelected ? const Color(0xFFFFC1CC) : Colors.white,
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(
-            color: const Color(0xFFFFC1CC),
-            width: 2,
-          ),
+          color: isSelected ? AppColors.blush : AppColors.white,
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: isSelected ? AppColors.rose : Colors.transparent, width: 1.5),
+          boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 6)],
         ),
-        child: Row(
-          children: [
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    title,
-                    style: TextStyle(
-                      fontWeight: FontWeight.bold,
-                      color:
-                          isSelected ? const Color(0xFF4C0004) : Colors.black87,
-                    ),
-                  ),
-                  Text(
-                    subtitle,
-                    style: const TextStyle(fontSize: 12, color: Colors.grey),
-                  ),
-                ],
-              ),
-            ),
-            if (isSelected)
-              const Icon(Icons.check_circle, color: Color(0xFF4C0004)),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildSlider(String label, double value, double min, double max,
-      Function(double) onChanged) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          label,
-          style: const TextStyle(fontWeight: FontWeight.bold),
-        ),
-        Slider(
-          value: value,
-          min: min,
-          max: max,
-          divisions: (max - min).toInt(),
-          label: value.toInt().toString(),
-          activeColor: const Color(0xFFFFC1CC),
-          onChanged: onChanged,
-        ),
-      ],
-    );
-  }
-
-  Widget _buildSectionHeader(String title) {
-    return Text(
-      title,
-      style: const TextStyle(
-        fontSize: 16,
-        fontWeight: FontWeight.bold,
-        color: Color(0xFF4C0004),
+        child: Row(children: [
+          Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text(title, style: TextStyle(fontWeight: FontWeight.w700, color: isSelected ? AppColors.rose : AppColors.dark)),
+            Text(subtitle, style: const TextStyle(fontSize: 12, color: AppColors.muted)),
+          ])),
+          if (isSelected) const Icon(Icons.check_circle_rounded, color: AppColors.rose, size: 20),
+        ]),
       ),
     );
   }
 
   Widget _buildMealPlanResult() {
     final success = _mealPlanResult?['success'] ?? false;
-
     if (!success) {
-      return Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(Icons.error_outline, size: 64, color: AppColors.error),
-            const SizedBox(height: 16),
-            Text(
-              'Error generating meal plan',
-              style: TextStyle(color: AppColors.error, fontSize: 16),
-            ),
-            const SizedBox(height: 16),
-            ElevatedButton.icon(
-              onPressed: () {
-                setState(() => _mealPlanResult = null);
-              },
-              icon: const Icon(Icons.arrow_back),
-              label: const Text('Try Again'),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFFFFC1CC),
-              ),
-            ),
-          ],
-        ),
-      );
+      return Center(child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+        const Icon(Icons.error_outline, size: 64, color: AppColors.error),
+        const SizedBox(height: 16),
+        const Text('Error generating meal plan', style: TextStyle(color: AppColors.error)),
+        const SizedBox(height: 16),
+        ElevatedButton(onPressed: () => setState(() => _mealPlanResult = null), child: const Text('Try Again')),
+      ]));
     }
-
     final meals = _mealPlanResult?['meals'] ?? [];
     final dailyNutrition = _mealPlanResult?['daily_nutrition'] ?? {};
     final shoppingList = _mealPlanResult?['shopping_list'] ?? [];
-
     return SingleChildScrollView(
-      padding: const EdgeInsets.all(16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // Meal type badge
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-            decoration: BoxDecoration(
-              color: const Color(0xFFFFC1CC),
-              borderRadius: BorderRadius.circular(20),
-            ),
-            child: Text(
-              '🎯 ${_selectedMealType.replaceAll('_', ' ').toUpperCase()}',
-              style: const TextStyle(
-                fontWeight: FontWeight.bold,
-                color: Color(0xFF4C0004),
-              ),
-            ),
-          ),
-          const SizedBox(height: 20),
-
-          // Daily nutrition summary
-          if (dailyNutrition.isNotEmpty) _buildNutritionSummary(dailyNutrition),
-          const SizedBox(height: 20),
-
-          // Meals list
-          _buildSectionHeader('🍽️ Meal Suggestions'),
-          const SizedBox(height: 12),
-          ...List.generate(
-            meals.length,
-            (index) =>
-                _buildMealCard(meals[index] as Map<String, dynamic>, index + 1),
-          ),
-          const SizedBox(height: 20),
-
-          // Shopping list
-          if (shoppingList.isNotEmpty) ...[
-            _buildSectionHeader('🛒 Shopping List'),
-            const SizedBox(height: 12),
-            _buildShoppingList(List<String>.from(shoppingList)),
-            const SizedBox(height: 20),
-          ],
-
-          // Back button
-          SizedBox(
-            width: double.infinity,
-            child: ElevatedButton.icon(
-              onPressed: () {
-                setState(() => _mealPlanResult = null);
-              },
-              icon: const Icon(Icons.arrow_back),
-              label: const Text('Generate Another Plan'),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFFAFA231),
-              ),
-            ),
-          ),
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+          decoration: BoxDecoration(color: AppColors.blush, borderRadius: BorderRadius.circular(20)),
+          child: Text('🎯 ${_selectedMealType.replaceAll('_', ' ').toUpperCase()}',
+            style: const TextStyle(fontWeight: FontWeight.w700, color: AppColors.rose, fontSize: 13)),
+        ),
+        const SizedBox(height: 16),
+        if (dailyNutrition.isNotEmpty) _buildNutritionSummary(dailyNutrition),
+        const SizedBox(height: 16),
+        _sectionLabel('🍽️ Meal Suggestions'),
+        const SizedBox(height: 10),
+        ...List.generate(meals.length, (i) => _buildMealCard(meals[i] as Map<String, dynamic>, i + 1)),
+        if (shoppingList.isNotEmpty) ...[
+          const SizedBox(height: 16),
+          _sectionLabel('🛒 Shopping List'),
+          const SizedBox(height: 10),
+          _buildShoppingList(List<String>.from(shoppingList)),
         ],
-      ),
+        const SizedBox(height: 20),
+        SizedBox(
+          width: double.infinity,
+          child: OutlinedButton.icon(
+            onPressed: () => setState(() => _mealPlanResult = null),
+            icon: const Icon(Icons.refresh, color: AppColors.rose),
+            label: const Text('Generate Another Plan', style: TextStyle(color: AppColors.rose)),
+            style: OutlinedButton.styleFrom(side: const BorderSide(color: AppColors.rose),
+              padding: const EdgeInsets.symmetric(vertical: 14),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14))),
+          ),
+        ),
+      ]),
     );
   }
 
   Widget _buildNutritionSummary(Map<String, dynamic> nutrition) {
     return Container(
       padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: const Color(0xFFFFC1CC), width: 2),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Text(
-            '📊 Daily Nutrition Target',
-            style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
-          ),
-          const SizedBox(height: 12),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceAround,
-            children: [
-              _buildNutritionItem('${nutrition['calories'] ?? 'N/A'}',
-                  'Calories', Icons.local_fire_department),
-              _buildNutritionItem(
-                  '${nutrition['protein_g'] ?? 'N/A'}g', 'Protein', Icons.egg),
-              _buildNutritionItem('${nutrition['carbs_g'] ?? 'N/A'}g', 'Carbs',
-                  Icons.rice_bowl),
-            ],
-          ),
-        ],
-      ),
+      decoration: BoxDecoration(color: AppColors.cardMint, borderRadius: BorderRadius.circular(16)),
+      child: Row(mainAxisAlignment: MainAxisAlignment.spaceAround, children: [
+        _nutritionStat('${nutrition['calories'] ?? 'N/A'}', 'Calories', '🔥'),
+        _nutritionStat('${nutrition['protein_g'] ?? 'N/A'}g', 'Protein', '🥚'),
+        _nutritionStat('${nutrition['carbs_g'] ?? 'N/A'}g', 'Carbs', '🍚'),
+      ]),
     );
   }
 
-  Widget _buildNutritionItem(String value, String label, IconData icon) {
-    return Column(
-      children: [
-        Icon(icon, color: const Color(0xFFAFA231), size: 24),
-        const SizedBox(height: 4),
-        Text(value, style: const TextStyle(fontWeight: FontWeight.bold)),
-        Text(label, style: const TextStyle(fontSize: 11, color: Colors.grey)),
-      ],
-    );
+  Widget _nutritionStat(String value, String label, String emoji) {
+    return Column(children: [
+      Text(emoji, style: const TextStyle(fontSize: 20)),
+      const SizedBox(height: 4),
+      Text(value, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 15, color: AppColors.dark)),
+      Text(label, style: const TextStyle(fontSize: 11, color: AppColors.muted)),
+    ]);
   }
 
   Widget _buildMealCard(Map<String, dynamic> meal, int mealNumber) {
-    return Card(
-      margin: const EdgeInsets.only(bottom: 12),
-      elevation: 2,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Container(
-                  width: 40,
-                  height: 40,
-                  decoration: BoxDecoration(
-                    color: const Color(0xFFFFC1CC),
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: Center(
-                    child: Text(
-                      'M$mealNumber',
-                      style: const TextStyle(
-                        fontWeight: FontWeight.bold,
-                        color: Color(0xFF4C0004),
-                      ),
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        meal['name'] ?? 'Meal $mealNumber',
-                        style: const TextStyle(
-                          fontWeight: FontWeight.bold,
-                          fontSize: 14,
-                          color: Color(0xFF4C0004),
-                        ),
-                      ),
-                      Text(
-                        meal['cuisine'] ?? 'Healthy cuisine',
-                        style:
-                            const TextStyle(fontSize: 12, color: Colors.grey),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 12),
-            Text(
-              meal['description'] ?? 'A delicious and nutritious meal',
-              style: const TextStyle(fontSize: 13, height: 1.4),
-            ),
-            // Show API recipe data if available
-            if (meal['api_recipe'] != null) ...[
-              const SizedBox(height: 12),
-              _buildRecipeDetails(meal['api_recipe']),
-            ],
-            if (meal['nutrition'] != null) ...[
-              const SizedBox(height: 12),
-              _buildMealNutrition(meal['nutrition']),
-            ],
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildRecipeDetails(Map<String, dynamic> recipe) {
-    final ingredients = recipe['ingredients'] as List<dynamic>?;
-    final cookTime = recipe['cook_time_minutes'];
-    final prepTime = recipe['prep_time_minutes'];
-
     return Container(
-      padding: const EdgeInsets.all(10),
-      decoration: BoxDecoration(
-        color: const Color(0xFFFFF0F5),
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: const Color(0xFFFFB6D9), width: 1),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Text(
-            '📖 Recipe from API Ninjas',
-            style: TextStyle(
-              fontSize: 11,
-              fontWeight: FontWeight.bold,
-              color: Color(0xFFAFA231),
-            ),
-          ),
+      margin: const EdgeInsets.only(bottom: 10),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(color: AppColors.white, borderRadius: BorderRadius.circular(16),
+        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 8)]),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [
+          Container(width: 36, height: 36,
+            decoration: BoxDecoration(color: AppColors.blush, borderRadius: BorderRadius.circular(10)),
+            child: Center(child: Text('M$mealNumber', style: const TextStyle(fontWeight: FontWeight.w800, color: AppColors.rose, fontSize: 13)))),
+          const SizedBox(width: 10),
+          Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text(meal['name'] ?? 'Meal $mealNumber', style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14, color: AppColors.dark)),
+            Text(meal['cuisine'] ?? '', style: const TextStyle(fontSize: 12, color: AppColors.muted)),
+          ])),
+        ]),
+        if (meal['description'] != null) ...[
           const SizedBox(height: 8),
-          Row(
-            children: [
-              if (prepTime != null) ...[
-                const Icon(Icons.timer, size: 14, color: Color(0xFFAFA231)),
-                const SizedBox(width: 4),
-                Text('Prep: ${prepTime}m',
-                    style: const TextStyle(fontSize: 11)),
-                const SizedBox(width: 12),
-              ],
-              if (cookTime != null) ...[
-                const Icon(Icons.local_fire_department,
-                    size: 14, color: Color(0xFFAFA231)),
-                const SizedBox(width: 4),
-                Text('Cook: ${cookTime}m',
-                    style: const TextStyle(fontSize: 11)),
-              ],
-            ],
+          Text(meal['description'], style: const TextStyle(fontSize: 13, color: AppColors.muted, height: 1.4)),
+        ],
+        if (meal['nutrition'] != null) ...[
+          const SizedBox(height: 10),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            decoration: BoxDecoration(color: AppColors.cream, borderRadius: BorderRadius.circular(10)),
+            child: Row(mainAxisAlignment: MainAxisAlignment.spaceAround, children: [
+              Text('�� ${meal['nutrition']['calories'] ?? 0} cal', style: const TextStyle(fontSize: 12, color: AppColors.muted)),
+              Text('🥚 ${meal['nutrition']['protein_g'] ?? 0}g', style: const TextStyle(fontSize: 12, color: AppColors.muted)),
+              Text('🍚 ${meal['nutrition']['carbs_g'] ?? 0}g', style: const TextStyle(fontSize: 12, color: AppColors.muted)),
+            ]),
           ),
-          if (ingredients != null && ingredients.isNotEmpty) ...[
-            const SizedBox(height: 8),
-            Text(
-              'Ingredients (${ingredients.length})',
-              style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold),
-            ),
-            const SizedBox(height: 4),
-            Wrap(
-              spacing: 4,
-              runSpacing: 4,
-              children: ingredients
-                  .take(5)
-                  .map(
-                    (ing) => Text(
-                      '• ${ing.toString().split(',').first}',
-                      style: const TextStyle(fontSize: 10),
-                    ),
-                  )
-                  .toList(),
-            ),
-            if (ingredients.length > 5)
-              Text(
-                '+ ${ingredients.length - 5} more',
-                style: const TextStyle(fontSize: 9, color: Colors.grey),
-              ),
-          ],
         ],
-      ),
-    );
-  }
-
-  Widget _buildMealNutrition(Map<String, dynamic> nutrition) {
-    return Container(
-      padding: const EdgeInsets.all(8),
-      decoration: BoxDecoration(
-        color: const Color(0xFFFFF8E1),
-        borderRadius: BorderRadius.circular(8),
-      ),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceAround,
-        children: [
-          _buildNutritionTag(
-              '${nutrition['calories'] ?? 0} cal', Icons.whatshot),
-          _buildNutritionTag(
-              '${nutrition['protein_g'] ?? 0}g protein', Icons.egg),
-          _buildNutritionTag(
-              '${nutrition['carbs_g'] ?? 0}g carbs', Icons.rice_bowl),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildNutritionTag(String text, IconData icon) {
-    return Row(
-      children: [
-        Icon(icon, size: 14, color: const Color(0xFFAFA231)),
-        const SizedBox(width: 4),
-        Text(text, style: const TextStyle(fontSize: 11)),
-      ],
+      ]),
     );
   }
 
   Widget _buildShoppingList(List<String> items) {
     return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: const Color(0xFFAFA231), width: 1),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            'Items to buy (${items.length})',
-            style: const TextStyle(fontWeight: FontWeight.bold),
-          ),
-          const SizedBox(height: 12),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: items
-                .map(
-                  (item) => Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 12,
-                      vertical: 6,
-                    ),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFFFFF8E1),
-                      borderRadius: BorderRadius.circular(20),
-                    ),
-                    child: Text(
-                      item,
-                      style: const TextStyle(fontSize: 12),
-                    ),
-                  ),
-                )
-                .toList(),
-          ),
-        ],
-      ),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(color: AppColors.cardPeach, borderRadius: BorderRadius.circular(16)),
+      child: Wrap(spacing: 8, runSpacing: 8, children: items.map((item) => Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        decoration: BoxDecoration(color: AppColors.white, borderRadius: BorderRadius.circular(20)),
+        child: Text(item, style: const TextStyle(fontSize: 12, color: AppColors.dark)),
+      )).toList()),
     );
   }
 }

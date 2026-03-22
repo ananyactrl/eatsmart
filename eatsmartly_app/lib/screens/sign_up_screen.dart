@@ -2,79 +2,66 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 import '../services/auth_service.dart';
-import '../main.dart';
 import '../theme.dart';
-import 'sign_up_screen.dart';
 
-class LoginScreen extends StatefulWidget {
-  const LoginScreen({Key? key}) : super(key: key);
+class SignUpScreen extends StatefulWidget {
+  const SignUpScreen({Key? key}) : super(key: key);
   @override
-  State<LoginScreen> createState() => _LoginScreenState();
+  State<SignUpScreen> createState() => _SignUpScreenState();
 }
 
-class _LoginScreenState extends State<LoginScreen> {
+class _SignUpScreenState extends State<SignUpScreen> {
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
+  final _confirmController = TextEditingController();
   final _formKey = GlobalKey<FormState>();
   bool _isLoading = false;
-  bool _obscurePassword = true;
+  bool _obscurePass = true;
+  bool _obscureConfirm = true;
 
   @override
   void dispose() {
     _emailController.dispose();
     _passwordController.dispose();
+    _confirmController.dispose();
     super.dispose();
   }
 
-  Future<void> _signIn() async {
+  Future<void> _signUp() async {
     if (!_formKey.currentState!.validate()) return;
     setState(() => _isLoading = true);
     try {
       final auth = Provider.of<AuthService>(context, listen: false);
-      await auth.signInWithEmailPassword(
+      await auth.signUpWithEmailPassword(
         email: _emailController.text.trim(),
         password: _passwordController.text.trim(),
       );
-      if (mounted) Navigator.of(context).pushAndRemoveUntil(
-        MaterialPageRoute(builder: (_) => const AuthWrapper()), (r) => false);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('Account created! Check your email.'),
+          backgroundColor: AppColors.success));
+        Navigator.of(context).pop();
+      }
     } catch (e) {
-      if (mounted) _showError(e.toString());
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(e.toString()), backgroundColor: AppColors.error));
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
   }
 
-  Future<void> _signInWithGoogle() async {
+  Future<void> _signUpWithGoogle() async {
     setState(() => _isLoading = true);
     try {
       final auth = Provider.of<AuthService>(context, listen: false);
-      await auth.signInWithGoogle();
-      if (mounted) Navigator.of(context).pushAndRemoveUntil(
-        MaterialPageRoute(builder: (_) => const AuthWrapper()), (r) => false);
+      await auth.signUpWithGoogle();
     } catch (e) {
-      if (mounted) _showError(e.toString());
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(e.toString()), backgroundColor: AppColors.error));
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
   }
-
-  Future<void> _resetPassword() async {
-    if (_emailController.text.trim().isEmpty) {
-      _showError('Enter your email first');
-      return;
-    }
-    try {
-      final auth = Provider.of<AuthService>(context, listen: false);
-      await auth.sendPasswordResetEmail(_emailController.text.trim());
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Reset email sent!'), backgroundColor: AppColors.success));
-    } catch (e) {
-      if (mounted) _showError(e.toString());
-    }
-  }
-
-  void _showError(String msg) => ScaffoldMessenger.of(context).showSnackBar(
-    SnackBar(content: Text(msg), backgroundColor: AppColors.error));
 
   @override
   Widget build(BuildContext context) {
@@ -85,34 +72,36 @@ class _LoginScreenState extends State<LoginScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // Hero header card
+              // Header card
               Container(
                 width: double.infinity,
                 margin: const EdgeInsets.all(16),
-                padding: const EdgeInsets.fromLTRB(24, 32, 24, 28),
+                padding: const EdgeInsets.fromLTRB(24, 28, 24, 24),
                 decoration: BoxDecoration(
-                  color: AppColors.rose,
+                  color: AppColors.coral,
                   borderRadius: BorderRadius.circular(28),
                 ),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
-                      decoration: BoxDecoration(
-                        color: Colors.white.withOpacity(0.25),
-                        borderRadius: BorderRadius.circular(20),
+                    GestureDetector(
+                      onTap: () => Navigator.of(context).pop(),
+                      child: Container(
+                        padding: const EdgeInsets.all(8),
+                        decoration: BoxDecoration(
+                          color: Colors.white.withOpacity(0.25),
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: const Icon(Icons.arrow_back, color: Colors.white, size: 20),
                       ),
-                      child: Text('eatsmart 🌿',
-                        style: GoogleFonts.poppins(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w600)),
                     ),
                     const SizedBox(height: 20),
-                    Text('Welcome\nback!',
+                    Text('Create\nAccount',
                       style: GoogleFonts.poppins(
-                        fontSize: 36, fontWeight: FontWeight.w800,
+                        fontSize: 34, fontWeight: FontWeight.w800,
                         color: Colors.white, height: 1.1)),
-                    const SizedBox(height: 8),
-                    Text('know what you\'re eating',
+                    const SizedBox(height: 6),
+                    Text('Start your smart eating journey',
                       style: GoogleFonts.poppins(
                         fontSize: 14, color: Colors.white.withOpacity(0.85))),
                   ],
@@ -127,11 +116,10 @@ class _LoginScreenState extends State<LoginScreen> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       const SizedBox(height: 8),
-                      Text('Sign in', style: GoogleFonts.poppins(
-                        fontSize: 22, fontWeight: FontWeight.w700, color: AppColors.dark)),
+                      Text('Your details', style: GoogleFonts.poppins(
+                        fontSize: 20, fontWeight: FontWeight.w700, color: AppColors.dark)),
                       const SizedBox(height: 20),
 
-                      // Email
                       _inputField(
                         controller: _emailController,
                         hint: 'Email address',
@@ -140,36 +128,37 @@ class _LoginScreenState extends State<LoginScreen> {
                         validator: (v) => (v == null || v.isEmpty) ? 'Enter your email' : null,
                       ),
                       const SizedBox(height: 12),
-
-                      // Password
                       _inputField(
                         controller: _passwordController,
                         hint: 'Password',
                         icon: Icons.lock_outline,
-                        obscure: _obscurePassword,
+                        obscure: _obscurePass,
                         suffix: IconButton(
-                          icon: Icon(_obscurePassword ? Icons.visibility_off_outlined : Icons.visibility_outlined,
+                          icon: Icon(_obscurePass ? Icons.visibility_off_outlined : Icons.visibility_outlined,
                             color: AppColors.muted, size: 20),
-                          onPressed: () => setState(() => _obscurePassword = !_obscurePassword),
+                          onPressed: () => setState(() => _obscurePass = !_obscurePass),
                         ),
-                        validator: (v) => (v == null || v.isEmpty) ? 'Enter your password' : null,
+                        validator: (v) => (v != null && v.length < 6) ? 'Min 6 characters' : null,
+                      ),
+                      const SizedBox(height: 12),
+                      _inputField(
+                        controller: _confirmController,
+                        hint: 'Confirm password',
+                        icon: Icons.lock_outline,
+                        obscure: _obscureConfirm,
+                        suffix: IconButton(
+                          icon: Icon(_obscureConfirm ? Icons.visibility_off_outlined : Icons.visibility_outlined,
+                            color: AppColors.muted, size: 20),
+                          onPressed: () => setState(() => _obscureConfirm = !_obscureConfirm),
+                        ),
+                        validator: (v) => v != _passwordController.text ? 'Passwords don\'t match' : null,
                       ),
 
-                      Align(
-                        alignment: Alignment.centerRight,
-                        child: TextButton(
-                          onPressed: _resetPassword,
-                          child: Text('Forgot password?',
-                            style: GoogleFonts.poppins(color: AppColors.rose, fontSize: 13)),
-                        ),
-                      ),
-
-                      const SizedBox(height: 4),
-                      // Login button
+                      const SizedBox(height: 24),
                       SizedBox(
                         width: double.infinity,
                         child: ElevatedButton(
-                          onPressed: _isLoading ? null : _signIn,
+                          onPressed: _isLoading ? null : _signUp,
                           style: ElevatedButton.styleFrom(
                             backgroundColor: AppColors.rose,
                             foregroundColor: Colors.white,
@@ -180,7 +169,7 @@ class _LoginScreenState extends State<LoginScreen> {
                           child: _isLoading
                             ? const SizedBox(height: 20, width: 20,
                                 child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                            : Text('Sign In', style: GoogleFonts.poppins(fontWeight: FontWeight.w700, fontSize: 16)),
+                            : Text('Create Account', style: GoogleFonts.poppins(fontWeight: FontWeight.w700, fontSize: 16)),
                         ),
                       ),
 
@@ -195,11 +184,10 @@ class _LoginScreenState extends State<LoginScreen> {
                       ]),
                       const SizedBox(height: 16),
 
-                      // Google button
                       SizedBox(
                         width: double.infinity,
                         child: OutlinedButton(
-                          onPressed: _isLoading ? null : _signInWithGoogle,
+                          onPressed: _isLoading ? null : _signUpWithGoogle,
                           style: OutlinedButton.styleFrom(
                             foregroundColor: AppColors.dark,
                             side: BorderSide(color: AppColors.coral.withOpacity(0.5)),
@@ -210,7 +198,7 @@ class _LoginScreenState extends State<LoginScreen> {
                           child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
                             const Icon(Icons.g_mobiledata, color: Colors.red, size: 24),
                             const SizedBox(width: 8),
-                            Text('Continue with Google',
+                            Text('Sign up with Google',
                               style: GoogleFonts.poppins(fontWeight: FontWeight.w600, fontSize: 14)),
                           ]),
                         ),
@@ -218,12 +206,11 @@ class _LoginScreenState extends State<LoginScreen> {
 
                       const SizedBox(height: 24),
                       Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-                        Text("Don't have an account? ",
+                        Text('Already have an account? ',
                           style: GoogleFonts.poppins(color: AppColors.muted, fontSize: 14)),
                         GestureDetector(
-                          onTap: () => Navigator.push(context,
-                            MaterialPageRoute(builder: (_) => const SignUpScreen())),
-                          child: Text('Sign Up',
+                          onTap: () => Navigator.of(context).pop(),
+                          child: Text('Sign In',
                             style: GoogleFonts.poppins(
                               color: AppColors.rose, fontWeight: FontWeight.w700, fontSize: 14)),
                         ),

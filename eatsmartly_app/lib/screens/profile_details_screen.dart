@@ -3,9 +3,8 @@ import 'package:google_fonts/google_fonts.dart';
 import 'product_detail_screen.dart';
 import 'product_list_screen.dart';
 import 'scanner_screen.dart';
-import '../widgets/bottom_nav.dart';
-import 'contact_nutritionist_screen.dart';
-import 'profile_form_screen.dart';
+import '../theme.dart';
+
 import 'meal_planner_screen.dart';
 
 class ProfileDetailsScreen extends StatefulWidget {
@@ -85,7 +84,7 @@ class _ProfileDetailsScreenState extends State<ProfileDetailsScreen> {
     final focus = profile['focus'] ?? '';
 
     return Scaffold(
-      backgroundColor: const Color(0xFFFFF8E1),
+      backgroundColor: AppColors.cream,
       appBar: AppBar(
         backgroundColor: Colors.transparent,
         elevation: 0,
@@ -185,7 +184,7 @@ class _ProfileDetailsScreenState extends State<ProfileDetailsScreen> {
                             selected: selected,
                             onSelected: (_) =>
                                 setState(() => _nutrientFocus = opt),
-                            selectedColor: const Color(0xFFFFC1CC),
+                            selectedColor: AppColors.rose,
                           ),
                         );
                       }).toList(),
@@ -282,7 +281,7 @@ class _ProfileDetailsScreenState extends State<ProfileDetailsScreen> {
                   );
                 },
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFFFFC1CC),
+                  backgroundColor: AppColors.rose,
                   foregroundColor: Colors.black,
                   padding: const EdgeInsets.symmetric(vertical: 14),
                   shape: RoundedRectangleBorder(
@@ -294,38 +293,6 @@ class _ProfileDetailsScreenState extends State<ProfileDetailsScreen> {
             const SizedBox(height: 24),
           ],
         ),
-      ),
-      bottomNavigationBar: AppBottomNav(
-        currentIndex: 4,
-        onTapOverride: (i) {
-          switch (i) {
-            case 0:
-              Navigator.pushReplacement(context,
-                  MaterialPageRoute(builder: (_) => const ProductListScreen()));
-              break;
-            case 1:
-              Navigator.push(context,
-                  MaterialPageRoute(builder: (_) => const ScannerScreen()));
-              break;
-            case 2:
-              Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                      builder: (_) => const ContactNutritionistScreen()));
-              break;
-            case 3:
-              Navigator.push(context,
-                  MaterialPageRoute(builder: (_) => const MealPlannerScreen()));
-              break;
-            case 4:
-              Navigator.push(context,
-                  MaterialPageRoute(builder: (_) => const ProfileFormScreen()));
-              break;
-            default:
-              Navigator.push(context,
-                  MaterialPageRoute(builder: (_) => const ProductListScreen()));
-          }
-        },
       ),
     );
   }

@@ -9,24 +9,36 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
-  
+
+  # Firebase & Authentication
+  firebase_core: ^2.24.2
+  firebase_auth: ^4.15.3
+  google_sign_in: ^6.1.6
+  cloud_firestore: ^4.13.6
+
+  # Supabase Integration
+  supabase_flutter: ^2.3.4
+
+  # Biometric Authentication
+  local_auth: ^2.1.6
+
   # HTTP & API
   http: ^1.1.0
-  
+
   # Barcode Scanning
   # Bump to a version that provides `takePicture()` on MobileScannerController
   mobile_scanner: ^4.0.0
 
   # On-device OCR (ML Kit)
   google_mlkit_text_recognition: ^0.13.0
-  
+
   # State Management
   provider: ^6.1.1
-  
+
   # UI Components
   flutter_svg: ^2.0.9
   google_fonts: ^6.1.0
-  
+
   # Utilities
   shared_preferences: ^2.2.2
   intl: ^0.18.1
