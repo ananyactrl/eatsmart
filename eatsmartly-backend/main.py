@@ -2,7 +2,7 @@
 EatSmartly Backend - FastAPI Application with Multi-Agent System.
 Main entry point for the barcode food analyzer API.
 """
-from fastapi import FastAPI, HTTPException, status, UploadFile, File, Request, Form
+from fastapi import FastAPI, HTTPException, status, UploadFile, File, Request
 from fastapi.staticfiles import StaticFiles
 import shutil
 from fastapi.middleware.cors import CORSMiddleware
@@ -11,12 +11,10 @@ from typing import Optional, List, Dict, Any
 from datetime import datetime
 import logging
 import os
-import socket
 from PIL import Image
 import io
 import requests
 import time
-from urllib.parse import quote
 
 from config import settings
 from agents.data_collection import DataCollectionAgent
@@ -1286,65 +1284,25 @@ async def save_product(request: SaveProductRequest):
 
 
 @app.post('/upload-front-image')
-async def upload_front_image(
-    file: UploadFile = File(...),
-    image_type: str = Form("front"),
-    barcode: Optional[str] = Form(None),
-    alt_text: Optional[str] = Form(None)
-):
+async def upload_front_image(request: Request, file: UploadFile = File(...)):
+    """Upload a front image for a product and return an accessible URL. Limited to 3 concurrent uploads."""
     async with upload_semaphore:
         try:
-            if not settings.SUPABASE_URL or not settings.SUPABASE_SERVICE_ROLE_KEY:
-                raise HTTPException(
-                    status_code=500,
-                    detail="Supabase storage is not configured. Set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY."
-                )
-
+            # sanitize filename
             base = os.path.basename(file.filename or 'front.jpg')
             filename = f"{int(datetime.utcnow().timestamp() * 1000)}_{base}"
+            dest_path = os.path.join(UPLOADS_DIR, filename)
 
-            content = await file.read()
-            bucket_name = settings.SUPABASE_BUCKET_NAME or "eatsmart"
-            encoded_path = quote(filename, safe="/._-")
-            upload_url = f"{settings.SUPABASE_URL}/storage/v1/object/{bucket_name}/{encoded_path}"
-            headers = {
-                "Authorization": f"Bearer {settings.SUPABASE_SERVICE_ROLE_KEY}",
-                "apikey": settings.SUPABASE_SERVICE_ROLE_KEY,
-                "Content-Type": file.content_type or "application/octet-stream",
-                "x-upsert": "true",
-            }
-            upload_res = requests.post(upload_url, data=content, headers=headers, timeout=30)
-            if upload_res.status_code >= 400:
-                raise HTTPException(
-                    status_code=500,
-                    detail=f"Supabase upload failed: {upload_res.status_code} {upload_res.text[:300]}"
-                )
+            # Write file to disk
+            with open(dest_path, 'wb') as out_f:
+                shutil.copyfileobj(file.file, out_f)
 
-            image_url = f"{settings.SUPABASE_URL}/storage/v1/object/public/{bucket_name}/{encoded_path}"
-
-            # Persist into food_images so /food-images endpoint can return newly uploaded photos.
-            if data_agent and data_agent.db_engine:
-                with data_agent.db_engine.begin() as conn:
-                    conn.execute(
-                        text("""
-                            INSERT INTO food_images (barcode, image_url, storage_path, image_type, alt_text, uploaded_at)
-                            VALUES (:barcode, :image_url, :storage_path, :image_type, :alt_text, CURRENT_TIMESTAMP)
-                        """),
-                        {
-                            "barcode": barcode,
-                            "image_url": image_url,
-                            "storage_path": f"{bucket_name}/{filename}",
-                            "image_type": image_type,
-                            "alt_text": alt_text
-                        }
-                    )
-
-            logger.info(f"Uploaded image to Supabase: {image_url}")
+            image_url = f"{str(request.base_url).rstrip('/')}/static/uploads/{filename}"
+            logger.info(f"Saved uploaded front image: {dest_path} -> {image_url}")
             return {"url": image_url}
-
         except Exception as e:
             logger.error(f"Front image upload failed: {e}")
-            raise HTTPException(status_code=500, detail=str(e))
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
 
 
 @app.post("/extract-text")
@@ -1898,7 +1856,6 @@ class SaveProductCompleteRequest(BaseModel):
     weight: Optional[str] = None
     fssai_license: Optional[str] = None
     image_url: Optional[str] = None
-    image_type: Optional[str] = "front"
     is_verified: Optional[bool] = False
     verified_by: Optional[str] = None
     # Nutrition facts (optional)
@@ -1944,11 +1901,7 @@ def _upsert_product_and_insert_nutrition(engine, payload: SaveProductCompleteReq
                         fssai_license = EXCLUDED.fssai_license,
                         image_url = EXCLUDED.image_url,
                         is_verified = EXCLUDED.is_verified,
-                        "verified_by": (
-    None if request.verified_by in ("string", "", None)
-    else request.verified_by
-),
-,
+                        verified_by = EXCLUDED.verified_by,
                         updated_at = EXCLUDED.updated_at
                     RETURNING id
                 """)
@@ -2038,25 +1991,6 @@ async def save_product_complete(payload: SaveProductCompleteRequest):
         product_id = _upsert_product_and_insert_nutrition(data_agent.db_engine, payload)
 
         if product_id:
-            if payload.image_url and data_agent and data_agent.db_engine:
-                storage_path = None
-                marker = "/storage/v1/object/public/"
-                if marker in payload.image_url:
-                    storage_path = payload.image_url.split(marker, 1)[1]
-                with data_agent.db_engine.begin() as conn:
-                    conn.execute(
-                        text("""
-                            INSERT INTO food_images (barcode, image_url, storage_path, image_type, alt_text, uploaded_at)
-                            VALUES (:barcode, :image_url, :storage_path, :image_type, :alt_text, CURRENT_TIMESTAMP)
-                        """),
-                        {
-                            "barcode": payload.barcode,
-                            "image_url": payload.image_url,
-                            "storage_path": storage_path or payload.image_url,
-                            "image_type": payload.image_type or "front",
-                            "alt_text": payload.product_name
-                        }
-                    )
             return {"status": "saved", "product_id": product_id}
         else:
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to save product to DB")
@@ -2212,28 +2146,11 @@ async def list_food_images(limit: int = 200, offset: int = 0, image_type: Option
 
 if __name__ == "__main__":
     import uvicorn
-
-    def _resolve_available_port(start_port: int, host: str = "0.0.0.0", max_tries: int = 20) -> int:
-        """Find an available TCP port to avoid startup crashes when a port is occupied."""
-        for candidate in range(start_port, start_port + max_tries):
-            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-                sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-                try:
-                    sock.bind((host, candidate))
-                    return candidate
-                except OSError:
-                    continue
-        return start_port
-
-    requested_port = int(os.getenv("PORT", "8000"))
-    port = _resolve_available_port(requested_port)
-    if port != requested_port:
-        logger.warning(f"Port {requested_port} is in use. Starting backend on port {port} instead.")
     
     uvicorn.run(
         "main:app",
         host="0.0.0.0",  # Allow connections from network (not just localhost)
-        port=port,
+        port=3000,
         reload=False,  # Disable reload to prevent shutdown issues
         log_level=settings.LOG_LEVEL.lower()
     )

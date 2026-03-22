@@ -13,7 +13,7 @@ import os
 import sys
 import requests
 import logging
-from urllib.parse import quote  # ✅ Changed from quote_plus to quote
+from urllib.parse import quote_plus
 from dotenv import load_dotenv
 
 # Load environment variables from .env file
@@ -45,17 +45,6 @@ HEADERS = {
     'Prefer': 'return=representation'
 }
 
-# Supabase storage info for images
-SUPABASE_PUBLIC_BUCKET = "eatsmart"
-SUPABASE_PROJECT_URL = SUPABASE_URL.rstrip('/')
-
-def build_supabase_image_url(filename: str) -> str:
-    """
-    Returns a properly URL-encoded public Supabase storage URL for the image.
-    """
-    safe_filename = quote(filename, safe="/")
-    return f"{SUPABASE_PROJECT_URL}/storage/v1/object/public/{SUPABASE_PUBLIC_BUCKET}/{safe_filename}"
-
 # Try 'products' table first (as suggested by Supabase error), fallback to 'food_products'
 API_BASE = SUPABASE_URL.rstrip('/') + '/rest/v1/products'
 API_BASE_NUTRITION = SUPABASE_URL.rstrip('/') + '/rest/v1/nutrition_facts'
@@ -69,8 +58,7 @@ PRODUCTS = [
         'source': 'manual',
         'official_website': 'https://disanofoods.com/',
         'product_page_url': 'https://disanofoods.com/',
-        'is_indian_product': True,
-        'image_filename': 'disano_pasta_front.webp'
+        'is_indian_product': True
     },
     {
         'name': 'Barilla Whole Wheat Pasta',
@@ -79,33 +67,159 @@ PRODUCTS = [
         'source': 'manual',
         'official_website': 'https://www.barilla.com/',
         'product_page_url': 'https://www.barilla.com/',
-        'is_indian_product': False,
-        'image_filename': 'barilla_pasta_front.webp'
+        'is_indian_product': False
     },
-    # ... add rest of your products, include 'image_filename' key
+    {
+        'name': 'Eco Life / Eco Valley Multigrain Pasta',
+        'brand': 'Eco Life (Eco Valley)',
+        'category': 'Pasta',
+        'source': 'manual',
+        'official_website': 'https://ecovalley.in/',
+        'product_page_url': 'https://ecovalley.in/',
+        'is_indian_product': True
+    },
+    {
+        'name': 'BORGES Whole Wheat Pasta',
+        'brand': 'BORGES',
+        'category': 'Pasta',
+        'source': 'manual',
+        'official_website': 'https://www.borges-international.com/',
+        'product_page_url': 'https://www.borges-international.com/',
+        'is_indian_product': False
+    },
+    {
+        'name': 'Organic Tattva Millet Pasta',
+        'brand': 'Organic Tattva',
+        'category': 'Pasta',
+        'source': 'manual',
+        'official_website': 'https://organictattva.com/',
+        'product_page_url': 'https://organictattva.com/',
+        'is_indian_product': True
+    },
+    {
+        'name': '24 Mantra Organic Pasta',
+        'brand': '24 Mantra Organic',
+        'category': 'Pasta',
+        'source': 'manual',
+        'official_website': 'https://www.24mantra.com/',
+        'product_page_url': 'https://www.24mantra.com/',
+        'is_indian_product': True
+    },
+    {
+        'name': 'Yogabar Multigrain Pasta',
+        'brand': 'Yogabar',
+        'category': 'Pasta',
+        'source': 'manual',
+        'official_website': 'https://yogabar.in/',
+        'product_page_url': 'https://yogabar.in/',
+        'is_indian_product': True
+    },
+    {
+        'name': 'Slurrp Farm Millet Pasta',
+        'brand': 'Slurrp Farm',
+        'category': 'Pasta',
+        'source': 'manual',
+        'official_website': 'https://www.slurrpfarm.com/',
+        'product_page_url': 'https://www.slurrpfarm.com/',
+        'is_indian_product': True
+    }
 ]
 
 
+def add_product_with_nutrition(product_data, nutrition_data=None):
+    """
+    Add a single product with optional nutrition data to the database.
+    
+    Args:
+        product_data (dict): Product info matching products table schema
+            - product_name, brand, category, manufacturer, region, weight
+            - fssai_license, image_url, barcode (optional)
+        nutrition_data (dict, optional): Nutrition info for nutrition_facts table
+            - serving_size, calories, protein, carbs, fat, fiber, etc.
+    
+    Returns:
+        dict: Result with product and nutrition IDs
+    """
+    """
+    Insert a product using the actual products table schema.
+    Maps old field names to new schema: product_name, brand, category, etc.
+    """
+    # Map to actual products table schema
+    product_record = {
+        'product_name': product.get('name'),
+        'brand': product.get('brand'),
+        'category': product.get('category'),
+        'manufacturer': product.get('manufacturer'),
+        'region': product.get('region'),
+        'weight': product.get('weight'),
+        'fssai_license': product.get('fssai_license'),
+        'image_url': product.get('image_url') or product.get('official_website'),
+        'barcode': product.get('barcode')
+    }
+    
+    # Remove None values
+    product_record = {k: v for k, v in product_record.items() if v is not None}
+    
+    r = requests.post(API_BASE, headers=HEADERS, json=product_record
+            'product_id': product_id,
+            'serving_size': nutrition_data.get('serving_size', '100g'),
+            'servings_per_container': nutrition_data.get('servings_per_container'),
+            'calories': int(nutrition_data.get('calories', 0)),
+            'total_fat': nutrition_data.get('total_fat'),
+            'saturated_fat': nutrition_data.get('saturated_fat'),
+            'trans_fat': nutrition_data.get('trans_fat'),
+            'cholesterol': nutrition_data.get('cholesterol'),
+            'sodium': nutrition_data.get('sodium'),
+            'total_carbohydrates': nutrition_data.get('total_carbohydrates'),
+            'dietary_fiber': nutrition_data.get('dietary_fiber'),
+            'total_sugars': nutrition_data.get('total_sugars'),
+            'added_sugars': nutrition_data.get('added_sugars'),
+            'protein': nutrition_data.get('protein'),
+            'confidence': nutrition_data.get('confidence', 'manual')
+        }
+        
+        r_nutrition = requests.post(API_BASE_NUTRITION, headers=HEADERS, json=nutrition_record)
+        
+        if r_nutrition.status_code in (200, 201):
+            nutrition_result = r_nutrition.json()
+            logger.info(f"✅ Nutrition data added!")
+            return {'product': result[0], 'nutrition': nutrition_result[0] if nutrition_result else None}
+        else:
+            logger.error(f"⚠️  Failed to add nutrition: {r_nutrition.status_code} - {r_nutrition.text}")
+            return {'product': result[0], 'nutrition': None}
+    
+    return {'product': result[0], 'nutrition': None}
+
+
+def supabase_get_by_url(url):
+    # Try to filter by url field (not product_page_url)
+    filter_url = quote_plus(f"url=eq.{url}")
+    q = f"{API_BASE}?{filter_url}&select=id,url"
+    r = requests.get(q, headers=HEADERS)
+    if r.status_code != 200:
+        # If url column doesn't exist, try name as secondary check
+        logger.debug(f"GET query failed: {r.status_code} {r.text}")
+        return None
+    data = r.json()
+    return data[0] if data else None
+
+
 def supabase_insert(product):
-    """
-    Insert a product into Supabase, generating a proper image URL.
-    """
+    # Only send fields that definitely exist in the products table
+    # Most Supabase product tables have: name, brand, category, source at minimum
     minimal_product = {
         'name': product['name'],
         'brand': product['brand'],
     }
-
+    
+    # Add optional fields if they exist in the schema
     if product.get('category'):
         minimal_product['category'] = product['category']
     if product.get('source'):
         minimal_product['source'] = product['source']
     if product.get('official_website'):
         minimal_product['url'] = product.get('official_website')  # Use 'url' not 'official_website'
-
-    # ✅ Build image_url using helper if image_filename exists
-    if product.get('image_filename'):
-        minimal_product['image_url'] = build_supabase_image_url(product['image_filename'])
-
+    
     r = requests.post(API_BASE, headers=HEADERS, json=minimal_product)
     if r.status_code not in (200, 201):
         logger.error(f"Insert failed: {r.status_code} {r.text}")
@@ -126,30 +240,27 @@ def supabase_update(product_id, product):
     return None
 
 
-def supabase_get_by_url(url):
-    # Try to filter by url field (not product_page_url)
-    filter_url = quote(f"url=eq.{url}")
-    q = f"{API_BASE}?{filter_url}&select=id,url"
-    r = requests.get(q, headers=HEADERS)
-    if r.status_code != 200:
-        logger.debug(f"GET query failed: {r.status_code} {r.text}")
-        return None
-    data = r.json()
-    return data[0] if data else None
-
-
 def main():
     print("\n" + "="*60)
     print("BRAND PRODUCT SCRAPER & DATABASE IMPORTER")
     print("="*60)
-
+    
+    # Try to scrape products from brand websites
     scraped_products = []
     if scrape_all_brands:
         print("\n🔍 Scraping products from brand websites...")
+        print("  - Disano Foods (https://disanofoods.com/)")
+        print("  - Organic Tattva (https://organictattva.com/)")
+        print("  - Barilla (https://www.barilla.com/)")
+        print()
+        
         try:
             products_by_brand = scrape_all_brands(max_per_brand=30)
+            
+            # Flatten the products list
             for brand, products in products_by_brand.items():
                 for product in products:
+                    # Convert scraped product to database format
                     scraped_products.append({
                         'name': product['name'],
                         'brand': product['brand'],
@@ -157,26 +268,27 @@ def main():
                         'source': product['source'],
                         'official_website': product.get('official_website'),
                         'product_page_url': product.get('product_url'),
-                        'is_indian_product': product.get('is_indian_product', False),
-                        'image_filename': product.get('image_filename')
+                        'is_indian_product': product.get('is_indian_product', False)
                     })
+            
             logger.info(f"\n✅ Scraped {len(scraped_products)} products from brand websites")
         except Exception as e:
             logger.error(f"❌ Error during scraping: {e}")
             logger.info("Falling back to hardcoded products list")
     else:
         logger.info("⚠️  Brand scrapers not available, using hardcoded products only")
-
+    
+    # Combine scraped products with hardcoded ones
     all_products = scraped_products + PRODUCTS if scraped_products else PRODUCTS
-
+    
     print(f"\n📦 Processing {len(all_products)} total products...")
     print("="*60 + "\n")
-
+    
     stats = {'added': 0, 'updated': 0, 'failed': 0}
-
+    
     for i, p in enumerate(all_products, 1):
         logger.info(f"[{i}/{len(all_products)}] Processing: {p['brand']} - {p['name'][:50]}...")
-
+        
         try:
             existing = supabase_get_by_url(p['product_page_url'])
             if existing:
@@ -200,7 +312,8 @@ def main():
         except Exception as e:
             logger.error(f"  ❌ Error processing product: {e}")
             stats['failed'] += 1
-
+    
+    # Print summary
     print("\n" + "="*60)
     print("IMPORT SUMMARY")
     print("="*60)

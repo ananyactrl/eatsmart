@@ -25,7 +25,7 @@ import 'package:http/http.dart' as http;
 
 class EatSmartlyAPI {
   // Change to your backend URL
-  static const String baseUrl = 'http://localhost:3000';
+  static const String baseUrl = 'http://localhost:8000';
   
   // For production
   // static const String baseUrl = 'https://api.eatsmartly.com';

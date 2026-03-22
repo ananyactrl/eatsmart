@@ -51,8 +51,8 @@ Write-Host "   cd ..\eatsmartly-backend" -ForegroundColor White
 Write-Host "   python main.py" -ForegroundColor White
 
 Write-Host "`n2. Update API endpoint in lib\services\api_service.dart:" -ForegroundColor Cyan
-Write-Host "   For physical device: http://YOUR_PC_IP:3000" -ForegroundColor White
-Write-Host "   For emulator: http://10.0.2.2:3000" -ForegroundColor White
+Write-Host "   For physical device: http://YOUR_PC_IP:8000" -ForegroundColor White
+Write-Host "   For emulator: http://10.0.2.2:8000" -ForegroundColor White
 
 Write-Host "`n3. Run the app:" -ForegroundColor Cyan
 Write-Host "   flutter run" -ForegroundColor White

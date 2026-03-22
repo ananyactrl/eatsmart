@@ -1,79 +1,15 @@
-# =========================
-# Python
-# =========================
 __pycache__/
 *.pyc
-*.pyo
-*.pyd
-
-# =========================
-# Environment & Secrets
-# =========================
 .env
-.env.*
-*.env
-
-# =========================
-# Virtual Environments
-# =========================
+*.db
+.DS_Store
 .venv/
 venv/
 env/
-
-# =========================
-# Logs & Runtime Files
-# =========================
 *.log
-*.pid
-*.seed
-
-# =========================
-# Databases
-# =========================
-*.db
-*.sqlite3
-
-# =========================
-# Testing & Coverage
-# =========================
 .pytest_cache/
 .coverage
 htmlcov/
-.tox/
-
-# =========================
-# Build Artifacts
-# =========================
 dist/
 build/
 *.egg-info/
-
-# =========================
-# OS / Editor Junk
-# =========================
-.DS_Store
-Thumbs.db
-.vscode/
-.idea/
-
-# =========================
-# Node / Frontend (IMPORTANT)
-# =========================
-node_modules/
-package-lock.json
-yarn.lock
-pnpm-lock.yaml
-
-# Next.js build output
-.next/
-**/.next/
-
-# Webpack / cache artifacts
-*.pack.gz
-.cache/
-
-# =========================
-# Misc
-# =========================
-*.tmp
-*.swp

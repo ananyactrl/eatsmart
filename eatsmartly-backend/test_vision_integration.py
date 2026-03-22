@@ -46,7 +46,7 @@ def test_extract_text():
     
     try:
         response = requests.post(
-            'http://localhost:3000/extract-text',
+            'http://localhost:8000/extract-text',
             files={'file': ('test_label.png', img_bytes, 'image/png')},
             timeout=30
         )
@@ -85,7 +85,7 @@ def test_detect_product():
     
     try:
         response = requests.post(
-            'http://localhost:3000/detect-product',
+            'http://localhost:8000/detect-product',
             files={'file': ('test_product.png', img_bytes, 'image/png')},
             timeout=30
         )
@@ -129,7 +129,7 @@ def test_usage_stats():
     print("="*60)
     
     try:
-        response = requests.get('http://localhost:3000/vision-usage', timeout=10)
+        response = requests.get('http://localhost:8000/vision-usage', timeout=10)
         
         if response.ok:
             result = response.json()
@@ -151,7 +151,7 @@ def test_usage_stats():
 
 if __name__ == '__main__':
     print("\n" + "🔬 Google Cloud Vision API Integration Tests" + "\n")
-    print("Make sure the backend server is running on http://localhost:3000\n")
+    print("Make sure the backend server is running on http://localhost:8000\n")
     
     # Test all endpoints
     results = []
